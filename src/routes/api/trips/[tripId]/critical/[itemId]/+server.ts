@@ -1,10 +1,39 @@
-import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
+import { json, error } from '@sveltejs/kit'
+import type { RequestHandler } from './$types'
+import { db } from '$lib/server/db'
+import { criticalItem } from '$lib/server/db/schema'
+import { eq } from 'drizzle-orm'
+import { requireAuth, requireMember } from '$lib/server/api'
 
 export const PUT: RequestHandler = async ({ locals, params, request }) => {
-  return json({});
-};
+	const user = requireAuth(locals)
+	await requireMember(user.id, params.tripId)
+
+	const body = await request.json()
+
+	const [updated] = await db
+		.update(criticalItem)
+		.set({
+			...(body.name !== undefined && { name: body.name }),
+			...(body.description !== undefined && { description: body.description }),
+			...(body.icon !== undefined && { icon: body.icon })
+		})
+		.where(eq(criticalItem.id, params.itemId))
+		.returning()
+
+	if (!updated || updated.tripId !== params.tripId) throw error(404, 'Critical item not found')
+	return json(updated)
+}
 
 export const DELETE: RequestHandler = async ({ locals, params }) => {
-  return new Response(null, { status: 204 });
-};
+	const user = requireAuth(locals)
+	await requireMember(user.id, params.tripId)
+
+	const found = await db.query.criticalItem.findFirst({
+		where: eq(criticalItem.id, params.itemId)
+	})
+	if (!found || found.tripId !== params.tripId) throw error(404, 'Critical item not found')
+
+	await db.delete(criticalItem).where(eq(criticalItem.id, params.itemId))
+	return new Response(null, { status: 204 })
+}

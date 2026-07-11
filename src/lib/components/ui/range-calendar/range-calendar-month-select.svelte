@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { RangeCalendar as RangeCalendarPrimitive } from "bits-ui";
-	import { cn, type WithoutChildrenOrChild } from "$lib/utils.js";
-	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import { RangeCalendar as RangeCalendarPrimitive } from 'bits-ui'
+	import { cn, type WithoutChildrenOrChild } from '$lib/utils.js'
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
 
 	let {
 		ref = $bindable(null),
@@ -9,12 +9,12 @@
 		value,
 		onchange,
 		...restProps
-	}: WithoutChildrenOrChild<RangeCalendarPrimitive.MonthSelectProps> = $props();
+	}: WithoutChildrenOrChild<RangeCalendarPrimitive.MonthSelectProps> = $props()
 </script>
 
 <span
 	class={cn(
-		"has-focus:border-ring border-input has-focus:ring-ring/50 relative flex rounded-md border shadow-xs has-focus:ring-[3px]",
+		'has-focus:border-ring border-input has-focus:ring-ring/50 relative flex rounded-md border shadow-xs has-focus:ring-[3px]',
 		className
 	)}
 >
@@ -37,7 +37,7 @@
 				aria-hidden="true"
 			>
 				{monthItems.find((item) => item.value === value)?.label || selectedMonthItem.label}
-				<ChevronDownIcon class={cn("size-4", className)} />
+				<ChevronDownIcon class={cn('size-4', className)} />
 			</span>
 		{/snippet}
 	</RangeCalendarPrimitive.MonthSelect>

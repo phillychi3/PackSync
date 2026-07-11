@@ -1,6 +1,45 @@
-import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
+import { json, error } from '@sveltejs/kit'
+import type { RequestHandler } from './$types'
+import { db } from '$lib/server/db'
+import { criticalItem, criticalItemConfirmation } from '$lib/server/db/schema'
+import { and, eq } from 'drizzle-orm'
+import { requireAuth, requireMember } from '$lib/server/api'
 
 export const POST: RequestHandler = async ({ locals, params, request }) => {
-  return json({}, { status: 201 });
-};
+	const user = requireAuth(locals)
+	await requireMember(user.id, params.tripId)
+
+	const item = await db.query.criticalItem.findFirst({
+		where: eq(criticalItem.id, params.itemId)
+	})
+	if (!item || item.tripId !== params.tripId) throw error(404, 'Critical item not found')
+
+	const body = await request.json().catch(() => ({}))
+
+	const [created] = await db
+		.insert(criticalItemConfirmation)
+		.values({
+			criticalItemId: params.itemId,
+			userId: user.id,
+			scheduleItemId: body.scheduleItemId ?? null
+		})
+		.returning()
+
+	return json(created, { status: 201 })
+}
+
+export const DELETE: RequestHandler = async ({ locals, params }) => {
+	const user = requireAuth(locals)
+	await requireMember(user.id, params.tripId)
+
+	const conf = await db.query.criticalItemConfirmation.findFirst({
+		where: and(
+			eq(criticalItemConfirmation.criticalItemId, params.itemId),
+			eq(criticalItemConfirmation.userId, user.id)
+		)
+	})
+	if (!conf) throw error(404, 'Confirmation not found')
+
+	await db.delete(criticalItemConfirmation).where(eq(criticalItemConfirmation.id, conf.id))
+	return new Response(null, { status: 204 })
+}
