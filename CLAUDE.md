@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-PackSync 是一個旅行管理 PWA，讓旅伴能共同管理行程、分帳、打包清單與重要物品確認。詳細的功能說明與領域概念見 [project.md](project.md)。
+PackSync 是一個旅行管理 PWA，讓旅伴能共同管理行程、分帳、打包清單與重要物品確認。詳細的功能說明與領域概念見 [project.md](project.md)。版面設計見[desine.md](desine.md)
 
 ## Tech Stack
 
