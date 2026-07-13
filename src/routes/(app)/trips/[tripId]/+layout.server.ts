@@ -14,6 +14,7 @@ export const load: LayoutServerLoad = async ({ locals, params }) => {
 
 	return {
 		trip: membership.trip,
-		role: membership.role
+		role: membership.role,
+		user: locals.user!
 	}
 }

@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit'
 import type { RequestHandler } from './$types'
 import { db } from '$lib/server/db'
-import { bill, billPayer, billParticipant } from '$lib/server/db/schema'
+import { bill, billPayer, billParticipant, billItem, settlement } from '$lib/server/db/schema'
 import { desc, eq } from 'drizzle-orm'
 import { requireAuth, requireMember } from '$lib/server/api'
 
@@ -11,7 +11,6 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 
 	const bills = await db.query.bill.findMany({
 		where: eq(bill.tripId, params.tripId),
-		with: { payers: true, participants: true },
 		orderBy: [desc(bill.date)]
 	})
 
@@ -28,6 +27,12 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 	if (!body.date) throw error(400, 'Date is required')
 	if (!Array.isArray(body.payers) || body.payers.length === 0)
 		throw error(400, 'At least one payer required')
+	const payerTotal = body.payers.reduce(
+		(sum: number, payer: { amount?: number }) => sum + (Number(payer.amount) || 0),
+		0
+	)
+	if (Math.abs(payerTotal - body.amount) > 0.01)
+		throw error(400, 'Payer total must equal bill amount')
 	if (!Array.isArray(body.participants) || body.participants.length === 0)
 		throw error(400, 'At least one participant required')
 
@@ -62,6 +67,20 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 				value: p.value ?? null
 			}))
 		)
+
+		if (Array.isArray(body.items) && body.items.length > 0) {
+			await tx.insert(billItem).values(
+				body.items.map(
+					(i: { name: string; amount: number; notes?: string; participants?: string[] }) => ({
+						billId: newBill.id,
+						name: i.name,
+						amount: i.amount,
+						notes: i.notes ?? null,
+						participants: i.participants ? JSON.stringify(i.participants) : null
+					})
+				)
+			)
+		}
 
 		return newBill
 	})

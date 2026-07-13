@@ -143,7 +143,7 @@ export const bill = sqliteTable(
 		currency: text('currency').notNull().default('TWD'),
 		category: text('category', { enum: ['餐飲', '交通', '住宿', '娛樂', '購物', '其他'] }),
 		date: text('date').notNull(),
-		splitMethod: text('split_method', { enum: ['equal', 'shares', 'percentage', 'fixed'] })
+		splitMethod: text('split_method', { enum: ['equal', 'percentage', 'fixed'] })
 			.notNull()
 			.default('equal'),
 		notes: text('notes'),
@@ -192,6 +192,25 @@ export const billParticipant = sqliteTable('bill_participant', {
 	value: real('value')
 })
 
+// ─── Bill Item ────────────────────────────────────────────────────────────────
+
+export const billItem = sqliteTable(
+	'bill_item',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		billId: text('bill_id')
+			.notNull()
+			.references(() => bill.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		amount: real('amount').notNull(),
+		notes: text('notes'),
+		participants: text('participants') // JSON array of userIds; null means all bill participants
+	},
+	(t) => [index('bill_item_bill_idx').on(t.billId)]
+)
+
 // ─── Settlement ───────────────────────────────────────────────────────────────
 
 export const settlement = sqliteTable(
@@ -203,6 +222,7 @@ export const settlement = sqliteTable(
 		tripId: text('trip_id')
 			.notNull()
 			.references(() => trip.id, { onDelete: 'cascade' }),
+		billId: text('bill_id').references(() => bill.id, { onDelete: 'cascade' }),
 		fromUserId: text('from_user_id')
 			.notNull()
 			.references(() => user.id),
@@ -390,19 +410,29 @@ export const scheduleItemRelations = relations(scheduleItem, ({ one, many }) => 
 export const billRelations = relations(bill, ({ one, many }) => ({
 	trip: one(trip, { fields: [bill.tripId], references: [trip.id] }),
 	payers: many(billPayer),
-	participants: many(billParticipant)
+	participants: many(billParticipant),
+	items: many(billItem)
 }))
 
 export const billPayerRelations = relations(billPayer, ({ one }) => ({
-	bill: one(bill, { fields: [billPayer.billId], references: [bill.id] })
+	bill: one(bill, { fields: [billPayer.billId], references: [bill.id] }),
+	user: one(user, { fields: [billPayer.userId], references: [user.id] })
 }))
 
 export const billParticipantRelations = relations(billParticipant, ({ one }) => ({
-	bill: one(bill, { fields: [billParticipant.billId], references: [bill.id] })
+	bill: one(bill, { fields: [billParticipant.billId], references: [bill.id] }),
+	user: one(user, { fields: [billParticipant.userId], references: [user.id] })
+}))
+
+export const billItemRelations = relations(billItem, ({ one }) => ({
+	bill: one(bill, { fields: [billItem.billId], references: [bill.id] })
 }))
 
 export const settlementRelations = relations(settlement, ({ one }) => ({
-	trip: one(trip, { fields: [settlement.tripId], references: [trip.id] })
+	trip: one(trip, { fields: [settlement.tripId], references: [trip.id] }),
+	bill: one(bill, { fields: [settlement.billId], references: [bill.id] }),
+	fromUser: one(user, { fields: [settlement.fromUserId], references: [user.id] }),
+	toUser: one(user, { fields: [settlement.toUserId], references: [user.id] })
 }))
 
 export const packingListRelations = relations(packingList, ({ one, many }) => ({

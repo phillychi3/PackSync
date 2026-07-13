@@ -36,10 +36,6 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 	})
 
 	if (existing) {
-		await db
-			.update(invitation)
-			.set({ usedAt: new Date(), usedBy: user.id })
-			.where(eq(invitation.id, inv.id))
 		return json({ tripId: inv.tripId, alreadyMember: true })
 	}
 

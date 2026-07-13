@@ -8,6 +8,13 @@
       "when": 1783712692594,
       "tag": "0000_secret_butterfly",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1783936372553,
+      "tag": "0001_fast_longshot",
+      "breakpoints": true
     }
   ]
 }

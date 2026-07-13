@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Check, Plus } from '@lucide/svelte'
+	import { Check, Plus, Trash2 } from '@lucide/svelte'
 	import { onMount } from 'svelte'
 	import { Button } from '$lib/components/ui/button'
 	import { Input } from '$lib/components/ui/input'
@@ -15,6 +15,11 @@
 	let items = $state<Critical[]>([])
 	let name = $state('')
 	let description = $state('')
+
+	function hasConfirmed(item: Critical) {
+		return item.confirmations.some((c) => c.userId === data.user.id)
+	}
+
 	async function load() {
 		const response = await fetch(`/api/trips/${data.trip.id}/critical`)
 		if (response.ok) items = await response.json()
@@ -33,6 +38,26 @@
 			description = ''
 		}
 	}
+	async function remove(id: string) {
+		if (!confirm('確定要刪除這個事項嗎？')) return
+		const res = await fetch(`/api/trips/${data.trip.id}/critical/${id}`, { method: 'DELETE' })
+		if (res.ok) items = items.filter((i) => i.id !== id)
+	}
+	async function toggleConfirm(item: Critical) {
+		if (hasConfirmed(item)) {
+			const res = await fetch(`/api/trips/${data.trip.id}/critical/${item.id}/confirm`, {
+				method: 'DELETE'
+			})
+			if (res.ok) item.confirmations = item.confirmations.filter((c) => c.userId !== data.user.id)
+		} else {
+			const res = await fetch(`/api/trips/${data.trip.id}/critical/${item.id}/confirm`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({})
+			})
+			if (res.ok) item.confirmations = [...item.confirmations, { userId: data.user.id }]
+		}
+	}
 	onMount(load)
 </script>
 
@@ -46,26 +71,53 @@
 			<p class="mt-3 text-black/55">把護照、訂單與其他不能遺漏的事項集中管理。</p>
 		</div>
 		<div class="mt-6 grid gap-3">
-			{#each items as item (item.id)}<article class="border border-black/10 bg-white p-5">
+			{#each items as item (item.id)}
+				{@const confirmed = hasConfirmed(item)}
+				<article class="border border-black/10 bg-white p-5">
 					<div class="flex items-start gap-3">
-						<div class="grid size-10 shrink-0 place-items-center bg-[#d8ff36]">
-							<Check class="size-5" />
+						<div
+							class="grid size-10 shrink-0 place-items-center {confirmed
+								? 'bg-[#d8ff36]'
+								: 'border border-black/15 bg-white'}"
+						>
+							{#if confirmed}<Check class="size-5" />{/if}
 						</div>
-						<div>
+						<div class="min-w-0 flex-1">
 							<h3 class="font-bold">{item.name}</h3>
-							{#if item.description}<p class="mt-1 text-sm leading-6 text-black/55">
-									{item.description}
-								</p>{/if}
+							{#if item.description}
+								<p class="mt-1 text-sm leading-6 text-black/55">{item.description}</p>
+							{/if}
 							<p class="mt-3 text-xs font-bold text-[#779a00]">
 								{item.confirmations.length} 位成員已確認
 							</p>
 						</div>
+						<div class="flex shrink-0 gap-2">
+							<button
+								type="button"
+								onclick={() => toggleConfirm(item)}
+								class="border px-3 py-1.5 font-mono text-[10px] font-bold tracking-widest transition {confirmed
+									? 'border-[#779a00] bg-[#eef0eb] text-[#779a00] hover:bg-[#d8ff36]'
+									: 'border-black/20 text-black/50 hover:border-black/50 hover:text-black'}"
+							>
+								{confirmed ? '已確認' : '確認'}
+							</button>
+							<button
+								type="button"
+								title="刪除事項"
+								class="text-black/30 hover:text-red-600"
+								onclick={() => remove(item.id)}
+							>
+								<Trash2 class="size-4" />
+							</button>
+						</div>
 					</div>
-				</article>{/each}{#if items.length === 0}<div
-					class="border border-dashed border-black/20 bg-white p-8 text-center text-black/50"
-				>
+				</article>
+			{/each}
+			{#if items.length === 0}
+				<div class="border border-dashed border-black/20 bg-white p-8 text-center text-black/50">
 					還沒有重要事項。
-				</div>{/if}
+				</div>
+			{/if}
 		</div>
 	</section>
 	<form class="grid h-fit gap-4 border border-black/10 bg-white p-5" onsubmit={add}>

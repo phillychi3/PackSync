@@ -3,8 +3,13 @@ import { APIError } from 'better-auth/api'
 import { auth } from '$lib/server/auth'
 import type { Actions, PageServerLoad } from './$types'
 
-export const load: PageServerLoad = ({ locals }) => {
-	if (locals.user) redirect(302, '/trips')
+function safeRedirectTo(value: string | null) {
+	if (!value?.startsWith('/') || value.startsWith('//')) return '/trips'
+	return value
+}
+
+export const load: PageServerLoad = ({ locals, url }) => {
+	if (locals.user) redirect(302, safeRedirectTo(url.searchParams.get('redirectTo')))
 	return {}
 }
 
@@ -20,6 +25,6 @@ export const actions: Actions = {
 			if (error instanceof APIError) return fail(400, { message: '電子郵件或密碼不正確。' })
 			return fail(500, { message: '目前無法登入，請稍後再試。' })
 		}
-		redirect(303, '/trips')
+		redirect(303, safeRedirectTo(event.url.searchParams.get('redirectTo')))
 	}
 }

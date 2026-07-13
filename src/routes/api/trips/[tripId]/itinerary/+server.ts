@@ -13,7 +13,8 @@ export const GET: RequestHandler = async ({ locals, params, url }) => {
 
 	const items = await db.query.scheduleItem.findMany({
 		where: eq(scheduleItem.tripId, params.tripId),
-		orderBy: [asc(scheduleItem.date), asc(scheduleItem.order)]
+		orderBy: [asc(scheduleItem.date), asc(scheduleItem.startTime), asc(scheduleItem.order)],
+		with: { place: true }
 	})
 
 	return json(date ? items.filter((i) => i.date === date) : items)

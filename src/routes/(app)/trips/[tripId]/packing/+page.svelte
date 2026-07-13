@@ -33,6 +33,14 @@
 			listName = ''
 		}
 	}
+	async function removeList(listId: string) {
+		if (!confirm('確定要刪除這個清單嗎？所有物品也會一起刪除。')) return
+		const res = await fetch(`/api/trips/${data.trip.id}/packing/${listId}`, { method: 'DELETE' })
+		if (res.ok) {
+			lists = lists.filter((l) => l.id !== listId)
+			if (selectedList === listId) selectedList = lists[0]?.id ?? ''
+		}
+	}
 	async function addItem(event: SubmitEvent) {
 		event.preventDefault()
 		if (!itemName.trim() || !selectedList) return
@@ -90,17 +98,34 @@
 			>
 		</form>
 		<div class="mt-4 grid gap-1">
-			{#each lists as list (list.id)}<button
-					type="button"
-					class={`flex items-center justify-between border px-3 py-3 text-left text-sm font-bold ${selectedList === list.id ? 'border-black bg-white' : 'border-transparent text-black/55 hover:bg-white'}`}
-					onclick={() => (selectedList = list.id)}
-					><span>{list.name}</span><span class="font-mono text-xs">{list.items.length}</span
-					></button
-				>{/each}
+			{#each lists as list (list.id)}
+				<div class="flex items-center gap-1">
+					<button
+						type="button"
+						class="flex flex-1 items-center justify-between border px-3 py-3 text-left text-sm font-bold {selectedList ===
+						list.id
+							? 'border-black bg-white'
+							: 'border-transparent text-black/55 hover:bg-white'}"
+						onclick={() => (selectedList = list.id)}
+					>
+						<span>{list.name}</span>
+						<span class="font-mono text-xs">{list.items.length}</span>
+					</button>
+					<button
+						type="button"
+						title="刪除清單"
+						class="shrink-0 p-2 text-black/30 hover:text-red-600"
+						onclick={() => removeList(list.id)}
+					>
+						<Trash2 class="size-4" />
+					</button>
+				</div>
+			{/each}
 		</div>
 	</aside>
 	<section class="border border-black/10 bg-white p-5 sm:p-7">
-		{#if selectedListData}<div class="flex items-end justify-between border-b border-black/10 pb-5">
+		{#if selectedListData}
+			<div class="flex items-end justify-between border-b border-black/10 pb-5">
 				<div>
 					<p class="font-mono text-xs font-bold tracking-[0.16em] text-black/40">PACKING LIST</p>
 					<h3 class="mt-2 text-2xl font-black">{selectedListData.name}</h3>
@@ -122,27 +147,35 @@
 				>
 			</form>
 			<div class="mt-5 grid gap-2">
-				{#each selectedListData.items as item (item.id)}<div
-						class="flex items-center gap-3 border-b border-black/10 py-3"
-					>
+				{#each selectedListData.items as item (item.id)}
+					<div class="flex items-center gap-3 border-b border-black/10 py-3">
 						<button
 							type="button"
 							title="標記已打包"
-							class={`grid size-6 place-items-center border ${item.isChecked ? 'border-[#779a00] bg-[#d8ff36]' : 'border-black/25'}`}
+							class="grid size-6 place-items-center border {item.isChecked
+								? 'border-[#779a00] bg-[#d8ff36]'
+								: 'border-black/25'}"
 							onclick={() => toggle(item)}
-							>{#if item.isChecked}<Check class="size-4" />{/if}</button
-						><span
-							class={`flex-1 text-sm font-bold ${item.isChecked ? 'text-black/35 line-through' : ''}`}
+						>
+							{#if item.isChecked}<Check class="size-4" />{/if}
+						</button>
+						<span
+							class="flex-1 text-sm font-bold {item.isChecked ? 'text-black/35 line-through' : ''}"
 							>{item.name}</span
-						><button
+						>
+						<button
 							type="button"
 							title="刪除物品"
 							class="text-black/35 hover:text-red-600"
 							onclick={() => remove(item)}><Trash2 class="size-4" /></button
 						>
-					</div>{/each}
-			</div>{:else}<div class="grid min-h-64 place-items-center text-center text-black/45">
+					</div>
+				{/each}
+			</div>
+		{:else}
+			<div class="grid min-h-64 place-items-center text-center text-black/45">
 				還沒有行李清單，先從左側建立一個吧。
-			</div>{/if}
+			</div>
+		{/if}
 	</section>
 </main>
