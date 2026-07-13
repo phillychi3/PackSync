@@ -4,12 +4,19 @@
 	import { Button } from '$lib/components/ui/button'
 	import { Input } from '$lib/components/ui/input'
 	import type { PageData } from './$types'
-	type Item = { id: string; name: string; quantity: number; isChecked: boolean }
+	type Item = {
+		id: string
+		name: string
+		quantity: number
+		isChecked: boolean
+		notes: string | null
+	}
 	type List = { id: string; name: string; items: Item[] }
 	let { data }: { data: PageData } = $props()
 	let lists = $state<List[]>([])
 	let listName = $state('')
 	let itemName = $state('')
+	let itemQuantity = $state('1')
 	let selectedList = $state('')
 	let selectedListData = $derived(lists.find((list) => list.id === selectedList))
 	async function load() {
@@ -47,12 +54,16 @@
 		const response = await fetch(`/api/trips/${data.trip.id}/packing/${selectedList}/items`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ name: itemName })
+			body: JSON.stringify({
+				name: itemName,
+				quantity: Math.max(1, Number(itemQuantity) || 1)
+			})
 		})
 		if (response.ok) {
 			const item = await response.json()
 			if (selectedListData) selectedListData.items = [...selectedListData.items, item]
 			itemName = ''
+			itemQuantity = '1'
 		}
 	}
 	async function toggle(item: Item) {
@@ -135,10 +146,16 @@
 						.items.length} 已完成</span
 				>
 			</div>
-			<form class="mt-5 flex gap-2" onsubmit={addItem}>
+			<form class="mt-5 grid gap-2 sm:grid-cols-[minmax(0,1fr)_100px_auto]" onsubmit={addItem}>
 				<Input
 					bind:value={itemName}
 					placeholder="加入物品，例如：護照"
+					class="rounded-none border-black/20 bg-[#fbfcf8]"
+				/><Input
+					type="number"
+					min="1"
+					bind:value={itemQuantity}
+					aria-label="數量"
 					class="rounded-none border-black/20 bg-[#fbfcf8]"
 				/><Button
 					type="submit"
@@ -160,9 +177,13 @@
 							{#if item.isChecked}<Check class="size-4" />{/if}
 						</button>
 						<span
-							class="flex-1 text-sm font-bold {item.isChecked ? 'text-black/35 line-through' : ''}"
-							>{item.name}</span
-						>
+							class="min-w-0 flex-1 text-sm font-bold {item.isChecked
+								? 'text-black/35 line-through'
+								: ''}"
+							>{item.name}
+							<span class="ml-2 font-mono text-xs font-normal text-black/45">× {item.quantity}</span
+							>
+						</span>
 						<button
 							type="button"
 							title="刪除物品"

@@ -300,7 +300,10 @@ export const criticalItem = sqliteTable('critical_item', {
 		.references(() => trip.id, { onDelete: 'cascade' }),
 	name: text('name').notNull(),
 	description: text('description'),
-	icon: text('icon')
+	icon: text('icon'),
+	scheduleItemId: text('schedule_item_id').references(() => scheduleItem.id, {
+		onDelete: 'set null'
+	})
 })
 
 // ─── Critical Item Confirmation ───────────────────────────────────────────────
@@ -371,6 +374,27 @@ export const message = sqliteTable(
 			.notNull()
 	},
 	(t) => [index('message_conversation_idx').on(t.conversationId)]
+)
+
+// ─── Web Push Subscription ──────────────────────────────────────────────────
+
+export const pushSubscription = sqliteTable(
+	'push_subscription',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		endpoint: text('endpoint').notNull().unique(),
+		p256dh: text('p256dh').notNull(),
+		auth: text('auth').notNull(),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.notNull()
+	},
+	(t) => [index('push_subscription_user_idx').on(t.userId)]
 )
 
 // ─── Relations ────────────────────────────────────────────────────────────────
@@ -450,6 +474,10 @@ export const todoRelations = relations(todo, ({ one }) => ({
 
 export const criticalItemRelations = relations(criticalItem, ({ one, many }) => ({
 	trip: one(trip, { fields: [criticalItem.tripId], references: [trip.id] }),
+	scheduleItem: one(scheduleItem, {
+		fields: [criticalItem.scheduleItemId],
+		references: [scheduleItem.id]
+	}),
 	confirmations: many(criticalItemConfirmation)
 }))
 

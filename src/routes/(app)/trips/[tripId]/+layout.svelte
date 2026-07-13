@@ -2,6 +2,8 @@
 	import { resolve } from '$app/paths'
 	import {
 		ArrowLeft,
+		Bell,
+		Bot,
 		CalendarDays,
 		CheckSquare,
 		CircleDollarSign,
@@ -22,7 +24,8 @@
 		{ href: `${base}/expenses`, label: '費用', icon: CircleDollarSign },
 		{ href: `${base}/todos`, label: '待辦', icon: ListChecks },
 		{ href: `${base}/critical`, label: '重要事項', icon: CheckSquare },
-		{ href: `${base}/members`, label: '成員', icon: Users }
+		{ href: `${base}/members`, label: '成員', icon: Users },
+		{ href: `${base}/agent`, label: 'AI Agent', icon: Bot }
 	])
 </script>
 
@@ -47,10 +50,19 @@
 						{data.trip.destination}
 					</p>{/if}
 			</div>
-			<span
-				class="shrink-0 bg-[#d8ff36] px-2 py-1 font-mono text-[10px] font-bold uppercase text-black"
-				>{data.role}</span
-			>
+			<div class="flex shrink-0 items-center gap-2">
+				<!-- eslint-disable svelte/no-navigation-without-resolve -->
+				<a
+					href={route(`${base}/notifications`)}
+					class="grid size-7 place-items-center border border-black/15 bg-white hover:border-black"
+					title="通知"
+					aria-label="通知"><Bell class="size-4" /></a
+				>
+				<!-- eslint-enable svelte/no-navigation-without-resolve -->
+				<span class="bg-[#d8ff36] px-2 py-1 font-mono text-[10px] font-bold uppercase text-black"
+					>{data.role}</span
+				>
+			</div>
 		</div>
 		<nav
 			class="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-5 pb-3 sm:px-8"

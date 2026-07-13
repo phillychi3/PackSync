@@ -1,6 +1,15 @@
 <script lang="ts">
 	import type * as LType from 'leaflet'
-	import { CalendarDays, MapPin, Pencil, Plus, Search, Trash2, X } from '@lucide/svelte'
+	import {
+		CalendarDays,
+		MapPin,
+		Pencil,
+		Plus,
+		Search,
+		ShieldAlert,
+		Trash2,
+		X
+	} from '@lucide/svelte'
 	import { Button } from '$lib/components/ui/button'
 	import { Input } from '$lib/components/ui/input'
 	import { Textarea } from '$lib/components/ui/textarea'
@@ -25,6 +34,12 @@
 		placeId: string | null
 		place: Place | null
 	}
+	type Critical = {
+		id: string
+		name: string
+		scheduleItemId: string | null
+		confirmations: { userId: string }[]
+	}
 	type SearchResult = {
 		placeId: number
 		name: string
@@ -36,6 +51,7 @@
 	let { data }: { data: PageData } = $props()
 	let items = $state<Item[]>([])
 	let places = $state<Place[]>([])
+	let criticalItems = $state<Critical[]>([])
 	let form = $state({ date: '', startTime: '', endTime: '', title: '', notes: '', placeId: '' })
 	let editingId = $state<string | null>(null)
 	let editForm = $state({
@@ -75,6 +91,12 @@
 		}
 		return [...groups.entries()].map(([date, dayItems]) => ({ date, items: dayItems }))
 	})
+
+	function relatedCritical(item: Item) {
+		return criticalItems.filter(
+			(critical) => critical.scheduleItemId === null || critical.scheduleItemId === item.id
+		)
+	}
 
 	$effect(() => {
 		if (!mapInitialized) return
@@ -133,12 +155,14 @@
 	}
 
 	async function load() {
-		const [itemsRes, placesRes] = await Promise.all([
+		const [itemsRes, placesRes, criticalRes] = await Promise.all([
 			fetch(`/api/trips/${data.trip.id}/itinerary`),
-			fetch(`/api/trips/${data.trip.id}/places`)
+			fetch(`/api/trips/${data.trip.id}/places`),
+			fetch(`/api/trips/${data.trip.id}/critical`)
 		])
 		if (itemsRes.ok) items = await itemsRes.json()
 		if (placesRes.ok) places = await placesRes.json()
+		if (criticalRes.ok) criticalItems = await criticalRes.json()
 	}
 
 	function onSearchInput() {
@@ -456,7 +480,12 @@
 											<p class="mt-2 text-sm text-black/50">{item.startTime || '全天'}</p>
 										</div>
 										<div class="min-w-0 flex-1">
-											<h3 class="font-bold">{item.title}</h3>
+											<h3 class="font-bold">
+												<a
+													href={`/trips/${data.trip.id}/itinerary/${item.id}`}
+													class="hover:text-[#779a00]">{item.title}</a
+												>
+											</h3>
 											{#if item.place}
 												<p class="mt-1 flex items-center gap-1 text-xs text-black/50">
 													<MapPin class="size-3 shrink-0" />
@@ -467,6 +496,35 @@
 											{/if}
 											{#if item.notes}
 												<p class="mt-1 text-sm leading-6 text-black/55">{item.notes}</p>
+											{/if}
+											{#if relatedCritical(item).length > 0}
+												<div class="mt-3 border-t border-black/10 pt-3">
+													<p
+														class="mb-2 flex items-center gap-1.5 text-xs font-bold text-[#779a00]"
+													>
+														<ShieldAlert class="size-3.5" /> 出發前需要確認
+													</p>
+													<div class="grid gap-1.5">
+														{#each relatedCritical(item) as critical (critical.id)}
+															{@const confirmed = critical.confirmations.some(
+																(confirmation) => confirmation.userId === data.user.id
+															)}
+															<a
+																href={`/trips/${data.trip.id}/critical`}
+																class="flex items-center justify-between gap-3 text-sm hover:text-[#779a00]"
+															>
+																<span class="min-w-0 truncate">{critical.name}</span>
+																<span
+																	class="shrink-0 text-xs {confirmed
+																		? 'text-[#779a00]'
+																		: 'text-amber-600'}"
+																>
+																	{confirmed ? '已確認' : '待確認'}
+																</span>
+															</a>
+														{/each}
+													</div>
+												</div>
 											{/if}
 											{#if item.endTime}
 												<p class="mt-2 text-xs text-black/40">結束於 {item.endTime}</p>

@@ -11,7 +11,12 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 
 	const items = await db.query.criticalItem.findMany({
 		where: eq(criticalItem.tripId, params.tripId),
-		with: { confirmations: true }
+		with: {
+			scheduleItem: true,
+			confirmations: {
+				with: { scheduleItem: true }
+			}
+		}
 	})
 
 	return json(items)
@@ -30,7 +35,8 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 			tripId: params.tripId,
 			name: body.name,
 			description: body.description ?? null,
-			icon: body.icon ?? null
+			icon: body.icon ?? null,
+			scheduleItemId: null
 		})
 		.returning()
 

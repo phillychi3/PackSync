@@ -23,9 +23,7 @@ export const PUT: RequestHandler = async ({ locals, params, request }) => {
 		.update(packingItem)
 		.set({
 			...(body.name !== undefined && { name: body.name }),
-			...(body.category !== undefined && { category: body.category }),
 			...(body.quantity !== undefined && { quantity: body.quantity }),
-			...(body.assignedTo !== undefined && { assignedTo: body.assignedTo }),
 			...(body.isChecked !== undefined && { isChecked: body.isChecked }),
 			...(body.notes !== undefined && { notes: body.notes })
 		})

@@ -38,9 +38,7 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 		.values({
 			listId: params.listId,
 			name: body.name,
-			category: body.category ?? null,
 			quantity: body.quantity ?? 1,
-			assignedTo: body.assignedTo ?? null,
 			notes: body.notes ?? null
 		})
 		.returning()

@@ -20,3 +20,18 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 
 	return json(conv)
 }
+
+export const DELETE: RequestHandler = async ({ locals, params }) => {
+	const user = requireAuth(locals)
+	await requireMember(user.id, params.tripId)
+
+	const conv = await db.query.conversation.findFirst({
+		where: eq(conversation.id, params.convId)
+	})
+	if (!conv || conv.tripId !== params.tripId || conv.userId !== user.id) {
+		throw error(404, 'Conversation not found')
+	}
+
+	await db.delete(conversation).where(eq(conversation.id, params.convId))
+	return new Response(null, { status: 204 })
+}

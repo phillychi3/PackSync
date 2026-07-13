@@ -5,6 +5,19 @@ import { scheduleItem } from '$lib/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireAuth, requireMember } from '$lib/server/api'
 
+export const GET: RequestHandler = async ({ locals, params }) => {
+	const user = requireAuth(locals)
+	await requireMember(user.id, params.tripId)
+
+	const item = await db.query.scheduleItem.findFirst({
+		where: eq(scheduleItem.id, params.itemId),
+		with: { place: true }
+	})
+	if (!item || item.tripId !== params.tripId) throw error(404, 'Schedule item not found')
+
+	return json(item)
+}
+
 export const PUT: RequestHandler = async ({ locals, params, request }) => {
 	const user = requireAuth(locals)
 	await requireMember(user.id, params.tripId)

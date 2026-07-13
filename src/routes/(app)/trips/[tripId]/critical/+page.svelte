@@ -9,20 +9,48 @@
 		id: string
 		name: string
 		description: string | null
-		confirmations: { userId: string }[]
+		scheduleItemId: string | null
+		confirmations: {
+			userId: string
+			confirmedAt: string | number | Date
+			scheduleItemId: string | null
+			scheduleItem: Schedule | null
+		}[]
+	}
+	type Schedule = {
+		id: string
+		date: string
+		title: string
+		startTime: string | null
+		transportMode: string | null
 	}
 	let { data }: { data: PageData } = $props()
 	let items = $state<Critical[]>([])
 	let name = $state('')
 	let description = $state('')
-
-	function hasConfirmed(item: Critical) {
-		return item.confirmations.some((c) => c.userId === data.user.id)
+	let scheduleItems = $state<Schedule[]>([])
+	let stageFilter = $state('all')
+	function itemSchedule(item: Critical) {
+		return scheduleItems.find((schedule) => schedule.id === item.scheduleItemId) ?? null
 	}
+	let groupedItems = $derived.by(() => {
+		const groups = new Map<string, Critical[]>()
+		for (const item of items) {
+			const schedule = itemSchedule(item)
+			const key = schedule ? stageLabel(schedule) : '全部情境'
+			if (stageFilter !== 'all' && key !== stageFilter) continue
+			groups.set(key, [...(groups.get(key) ?? []), item])
+		}
+		return [...groups.entries()]
+	})
 
 	async function load() {
-		const response = await fetch(`/api/trips/${data.trip.id}/critical`)
+		const [response, scheduleResponse] = await Promise.all([
+			fetch(`/api/trips/${data.trip.id}/critical`),
+			fetch(`/api/trips/${data.trip.id}/itinerary`)
+		])
 		if (response.ok) items = await response.json()
+		if (scheduleResponse.ok) scheduleItems = await scheduleResponse.json()
 	}
 	async function add(event: SubmitEvent) {
 		event.preventDefault()
@@ -43,20 +71,18 @@
 		const res = await fetch(`/api/trips/${data.trip.id}/critical/${id}`, { method: 'DELETE' })
 		if (res.ok) items = items.filter((i) => i.id !== id)
 	}
-	async function toggleConfirm(item: Critical) {
-		if (hasConfirmed(item)) {
-			const res = await fetch(`/api/trips/${data.trip.id}/critical/${item.id}/confirm`, {
-				method: 'DELETE'
-			})
-			if (res.ok) item.confirmations = item.confirmations.filter((c) => c.userId !== data.user.id)
-		} else {
-			const res = await fetch(`/api/trips/${data.trip.id}/critical/${item.id}/confirm`, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({})
-			})
-			if (res.ok) item.confirmations = [...item.confirmations, { userId: data.user.id }]
-		}
+	async function saveSchedule(item: Critical, selectedScheduleId: string) {
+		const res = await fetch(`/api/trips/${data.trip.id}/critical/${item.id}`, {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ scheduleItemId: selectedScheduleId || null })
+		})
+		if (res.ok) await load()
+	}
+	function stageLabel(schedule: Schedule) {
+		if (schedule.transportMode) return `交通 · ${schedule.transportMode}`
+		if (/住宿|飯店|旅館|hotel/i.test(schedule.title)) return '住宿'
+		return '行程'
 	}
 	onMount(load)
 </script>
@@ -70,48 +96,68 @@
 			<h2 class="mt-3 text-4xl font-black tracking-[-0.05em]">出發前確認</h2>
 			<p class="mt-3 text-black/55">把護照、訂單與其他不能遺漏的事項集中管理。</p>
 		</div>
+		<div class="mt-5 flex items-center gap-3">
+			<label class="text-sm font-bold" for="stage-filter">分組</label>
+			<select
+				id="stage-filter"
+				bind:value={stageFilter}
+				class="h-9 border border-black/20 bg-white px-3 text-sm"
+			>
+				<option value="all">全部情境</option>
+				{#each [...new Set(items.flatMap((item) => {
+							const schedule = itemSchedule(item)
+							return schedule ? [stageLabel(schedule)] : []
+						}))] as stage}
+					<option value={stage}>{stage}</option>
+				{/each}
+			</select>
+		</div>
 		<div class="mt-6 grid gap-3">
-			{#each items as item (item.id)}
-				{@const confirmed = hasConfirmed(item)}
-				<article class="border border-black/10 bg-white p-5">
-					<div class="flex items-start gap-3">
-						<div
-							class="grid size-10 shrink-0 place-items-center {confirmed
-								? 'bg-[#d8ff36]'
-								: 'border border-black/15 bg-white'}"
-						>
-							{#if confirmed}<Check class="size-5" />{/if}
-						</div>
-						<div class="min-w-0 flex-1">
-							<h3 class="font-bold">{item.name}</h3>
-							{#if item.description}
-								<p class="mt-1 text-sm leading-6 text-black/55">{item.description}</p>
-							{/if}
-							<p class="mt-3 text-xs font-bold text-[#779a00]">
-								{item.confirmations.length} 位成員已確認
-							</p>
-						</div>
-						<div class="flex shrink-0 gap-2">
-							<button
-								type="button"
-								onclick={() => toggleConfirm(item)}
-								class="border px-3 py-1.5 font-mono text-[10px] font-bold tracking-widest transition {confirmed
-									? 'border-[#779a00] bg-[#eef0eb] text-[#779a00] hover:bg-[#d8ff36]'
-									: 'border-black/20 text-black/50 hover:border-black/50 hover:text-black'}"
-							>
-								{confirmed ? '已確認' : '確認'}
-							</button>
-							<button
-								type="button"
-								title="刪除事項"
-								class="text-black/30 hover:text-red-600"
-								onclick={() => remove(item.id)}
-							>
-								<Trash2 class="size-4" />
-							</button>
-						</div>
+			{#each groupedItems as [group, groupItems]}
+				<div>
+					<h3 class="mb-2 font-mono text-xs font-bold tracking-widest text-black/45">{group}</h3>
+					<div class="grid gap-3">
+						{#each groupItems as item (item.id)}
+							<article class="border border-black/10 bg-white p-5">
+								<div class="flex items-start gap-3">
+									<div
+										class="grid size-10 shrink-0 place-items-center border border-black/15 bg-white"
+									>
+										<Check class="size-5 text-[#779a00]" />
+									</div>
+									<div class="min-w-0 flex-1">
+										<h3 class="font-bold">{item.name}</h3>
+										{#if item.description}
+											<p class="mt-1 text-sm leading-6 text-black/55">{item.description}</p>
+										{/if}
+										<p class="mt-3 text-xs text-[#779a00]">選擇情境後，會在對應行程中提醒攜帶</p>
+									</div>
+									<div class="flex shrink-0 flex-wrap justify-end gap-2">
+										<select
+											value={item.scheduleItemId ?? ''}
+											class="h-8 max-w-40 border border-black/20 bg-white px-2 text-xs"
+											onchange={(event) =>
+												saveSchedule(item, (event.currentTarget as HTMLSelectElement).value)}
+										>
+											<option value="">全部情境</option>
+											{#each scheduleItems as schedule (schedule.id)}
+												<option value={schedule.id}>{schedule.date} · {schedule.title}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											title="刪除事項"
+											class="text-black/30 hover:text-red-600"
+											onclick={() => remove(item.id)}
+										>
+											<Trash2 class="size-4" />
+										</button>
+									</div>
+								</div>
+							</article>
+						{/each}
 					</div>
-				</article>
+				</div>
 			{/each}
 			{#if items.length === 0}
 				<div class="border border-dashed border-black/20 bg-white p-8 text-center text-black/50">

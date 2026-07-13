@@ -1,0 +1,34 @@
+/// <reference lib="webworker" />
+
+import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching'
+
+declare const self: ServiceWorkerGlobalScope & {
+	__WB_MANIFEST: Array<{ revision: string | null; url: string }>
+}
+
+precacheAndRoute(self.__WB_MANIFEST)
+cleanupOutdatedCaches()
+
+self.addEventListener('push', (event) => {
+	let payload: { title?: string; body?: string; url?: string } = {}
+	try {
+		payload = event.data?.json() ?? {}
+	} catch {
+		payload = { body: event.data?.text() }
+	}
+
+	event.waitUntil(
+		self.registration.showNotification(payload.title ?? 'PackSync 通知', {
+			body: payload.body ?? '你有一則新的旅程通知。',
+			icon: '/pwa-192x192.png',
+			badge: '/pwa-64x64.png',
+			data: { url: payload.url ?? '/trips' }
+		})
+	)
+})
+
+self.addEventListener('notificationclick', (event) => {
+	event.notification.close()
+	const url = event.notification.data?.url ?? '/trips'
+	event.waitUntil(self.clients.openWindow(url))
+})
