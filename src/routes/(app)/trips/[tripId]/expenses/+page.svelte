@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { resolve } from '$app/paths'
 	import { ArrowRight, CircleDollarSign, Plus, RefreshCw } from '@lucide/svelte'
+	import { Axis, Bars, Chart, Layer } from 'layerchart'
+	import { ChartContainer } from '$lib/components/ui/chart'
+	import type { ChartConfig } from '$lib/components/ui/chart'
 	import { onMount } from 'svelte'
 	import { Button } from '$lib/components/ui/button'
 	import type { PageData } from './$types'
@@ -12,7 +15,12 @@
 		currency: string
 		date: string
 		category: string | null
+		splitMethod: 'equal' | 'percentage' | 'fixed'
+		payers: { userId: string; amount: number }[]
+		participants: { userId: string; value: number | null }[]
+		items: { amount: number; participants: string | null }[]
 	}
+	type Member = { userId: string; name: string; email: string }
 	type SUser = { id: string; name: string; email: string; image: string | null }
 	type Settlement = {
 		id: string
@@ -23,21 +31,111 @@
 		fromUser: SUser
 		toUser: SUser
 		details?: { billId: string; billTitle: string; itemName: string; amount: number }[]
+		billId?: string | null
 	}
 	type CalculatedTransfer = { fromUserId: string; toUserId: string; amount: number }
 	type Calculation = { balances: Record<string, number>; transfers: CalculatedTransfer[] }
 
 	let { data }: { data: PageData } = $props()
 	let bills = $state<Bill[]>([])
+	let members = $state<Member[]>([])
 	let settlements = $state<Settlement[]>([])
+	let statsStart = $state('')
+	let statsEnd = $state('')
+	let chartsReady = $state(false)
 	let calculatedBalances = $state<Record<string, number>>({})
 	let recalculating = $state(false)
 	let calculated = $state(false)
 
 	let total = $derived(bills.reduce((sum, b) => sum + b.amount, 0))
+	let filteredBills = $derived(
+		bills.filter(
+			(bill) => (!statsStart || bill.date >= statsStart) && (!statsEnd || bill.date <= statsEnd)
+		)
+	)
+	let categoryStats = $derived.by(() => {
+		const result = new Map<string, number>()
+		for (const bill of filteredBills) {
+			const amount = Number(bill.amount)
+			if (!Number.isFinite(amount)) continue
+			const category = bill.category || '未分類'
+			result.set(category, (result.get(category) ?? 0) + amount)
+		}
+		return [...result.entries()].sort((a, b) => b[1] - a[1])
+	})
+	let categoryChartData = $derived(categoryStats.map(([label, amount]) => ({ label, amount })))
+	let categoryChartLabels = $derived(categoryChartData.map((item) => item.label))
+	let categoryChartMax = $derived(Math.max(...categoryChartData.map((item) => item.amount), 1))
+	let dailyChartData = $derived.by(() => {
+		const result = new Map<string, number>()
+		for (const bill of filteredBills) {
+			const amount = Number(bill.amount)
+			if (!Number.isFinite(amount)) continue
+			result.set(bill.date, (result.get(bill.date) ?? 0) + amount)
+		}
+		return [...result.entries()]
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([label, amount]) => ({ label: label.slice(5), amount }))
+	})
+	let dailyChartLabels = $derived(dailyChartData.map((item) => item.label))
+	let dailyChartMax = $derived(Math.max(...dailyChartData.map((item) => item.amount), 1))
+	let memberStats = $derived.by(() => {
+		const result = new Map<string, { paid: number; owed: number }>()
+		const add = (userId: string, key: 'paid' | 'owed', amount: number) => {
+			const current = result.get(userId) ?? { paid: 0, owed: 0 }
+			current[key] += amount
+			result.set(userId, current)
+		}
+		for (const bill of filteredBills) {
+			for (const payer of bill.payers) add(payer.userId, 'paid', payer.amount)
+			if (bill.items.length > 0) {
+				for (const item of bill.items) {
+					let ids = bill.participants.map((participant) => participant.userId)
+					if (item.participants) {
+						try {
+							ids = JSON.parse(item.participants) as string[]
+						} catch {
+							ids = []
+						}
+					}
+					if (ids.length > 0) {
+						for (const userId of ids) add(userId, 'owed', item.amount / ids.length)
+					}
+				}
+			} else {
+				const totalPaid = bill.payers.reduce((sum, payer) => sum + payer.amount, 0)
+				for (const participant of bill.participants) {
+					const amount =
+						bill.splitMethod === 'equal'
+							? totalPaid / bill.participants.length
+							: bill.splitMethod === 'percentage'
+								? totalPaid * ((participant.value ?? 0) / 100)
+								: (participant.value ?? 0)
+					add(participant.userId, 'owed', amount)
+				}
+			}
+		}
+		return members
+			.map((member) => ({
+				...member,
+				...(result.get(member.userId) ?? { paid: 0, owed: 0 })
+			}))
+			.filter((member) => member.paid > 0 || member.owed > 0)
+	})
+	let maxCategoryTotal = $derived(Math.max(...categoryStats.map(([, amount]) => amount), 1))
+	let maxMemberTotal = $derived(
+		Math.max(...memberStats.map((member) => Math.max(member.paid, member.owed)), 1)
+	)
+	const categoryChartConfig = {
+		amount: { label: '支出', color: 'var(--chart-1)' }
+	} satisfies ChartConfig
+	const dailyChartConfig = {
+		amount: { label: '每日支出', color: 'var(--chart-1)' }
+	} satisfies ChartConfig
+	let pendingSettlements = $derived(settlements.filter((settlement) => !settlement.isSettled))
 	let settlementGroups = $derived.by(() => {
 		const groups = new Map<string, { title: string; settlements: Settlement[] }>()
-		for (const settlement of settlements) {
+		for (const settlement of pendingSettlements) {
 			const firstDetail = settlement.details?.[0]
 			const key = firstDetail?.billId ?? 'legacy'
 			const group = groups.get(key) ?? {
@@ -74,15 +172,17 @@
 	}
 
 	async function load() {
-		const [billsRes, settlementsRes, calculationRes] = await Promise.all([
+		const [billsRes, settlementsRes, calculationRes, membersRes] = await Promise.all([
 			fetch(`/api/trips/${data.trip.id}/bills`),
 			fetch(`/api/trips/${data.trip.id}/settlements`),
-			fetch(`/api/trips/${data.trip.id}/settlements/calculate`)
+			fetch(`/api/trips/${data.trip.id}/settlements/calculate`),
+			fetch(`/api/trips/${data.trip.id}/members`)
 		])
 		const loadedBills: Bill[] = billsRes.ok ? await billsRes.json() : []
 		const loadedSettlements: Settlement[] = settlementsRes.ok ? await settlementsRes.json() : []
 		const calculation: Calculation | null = calculationRes.ok ? await calculationRes.json() : null
 		bills = loadedBills
+		if (membersRes.ok) members = await membersRes.json()
 		settlements = loadedSettlements
 
 		if (calculation) {
@@ -124,7 +224,13 @@
 		}
 	}
 
-	onMount(load)
+	onMount(() => {
+		load()
+		const frame = requestAnimationFrame(() => {
+			chartsReady = true
+		})
+		return () => cancelAnimationFrame(frame)
+	})
 </script>
 
 <main class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:py-12">
@@ -185,8 +291,110 @@
 		</div>
 	</div>
 
+	<!-- Statistics -->
+	<section class="mt-8 border border-black/10 bg-white p-5 sm:p-8">
+		<div
+			class="flex flex-col gap-4 border-b border-black/10 pb-5 sm:flex-row sm:items-end sm:justify-between"
+		>
+			<div>
+				<p class="font-mono text-[10px] font-bold tracking-widest text-black/40">費用統計</p>
+				<h3 class="mt-2 text-2xl font-black">支出分析</h3>
+			</div>
+			<div class="grid grid-cols-2 gap-2">
+				<label class="grid gap-1 text-xs font-bold text-black/55"
+					>開始日期
+					<input
+						type="date"
+						bind:value={statsStart}
+						class="h-9 border border-black/20 bg-[#fbfcf8] px-2"
+					/>
+				</label>
+				<label class="grid gap-1 text-xs font-bold text-black/55"
+					>結束日期
+					<input
+						type="date"
+						bind:value={statsEnd}
+						class="h-9 border border-black/20 bg-[#fbfcf8] px-2"
+					/>
+				</label>
+			</div>
+		</div>
+		<div class="mt-5 grid gap-6 lg:grid-cols-2">
+			<div>
+				<div class="mb-3 flex items-center justify-between">
+					<h4 class="font-bold">依類別</h4>
+					<span class="font-mono text-xs text-black/45"
+						>{data.trip.currency}
+						{filteredBills.reduce((sum, bill) => sum + bill.amount, 0).toFixed(2)}</span
+					>
+				</div>
+				{#if chartsReady && categoryChartData.length > 0}
+					{#key categoryChartLabels.join('|') + ':' + categoryChartMax}
+						<ChartContainer config={categoryChartConfig} class="h-56 w-full min-w-0">
+							<Chart
+								data={categoryChartData}
+								x="label"
+								y="amount"
+								xDomain={categoryChartLabels}
+								yDomain={[0, categoryChartMax]}
+								yBaseline={0}
+								bandPadding={0.35}
+								padding={{ top: 12, right: 12, bottom: 32, left: 42 }}
+							>
+								<Layer type="svg">
+									<Axis placement="left" grid tickMarks={false} />
+									<Axis placement="bottom" tickMarks={false} />
+									<Bars
+										data={categoryChartData}
+										x="label"
+										y="amount"
+										radius={4}
+										fill="var(--chart-1)"
+										tooltip
+									/>
+								</Layer>
+							</Chart>
+						</ChartContainer>
+					{/key}
+				{:else}<p class="text-sm text-black/40">沒有符合日期的費用。</p>{/if}
+			</div>
+		</div>
+		<div class="mt-6 border-t border-black/10 pt-5">
+			<h4 class="mb-3 font-bold">依日期</h4>
+			{#if chartsReady && dailyChartData.length > 0}
+				{#key dailyChartLabels.join('|') + ':' + dailyChartMax}
+					<ChartContainer config={dailyChartConfig} class="h-56 w-full min-w-0">
+						<Chart
+							data={dailyChartData}
+							x="label"
+							y="amount"
+							xDomain={dailyChartLabels}
+							yDomain={[0, dailyChartMax]}
+							yBaseline={0}
+							bandPadding={0.25}
+							padding={{ top: 12, right: 12, bottom: 32, left: 42 }}
+						>
+							<Layer type="svg">
+								<Axis placement="left" grid tickMarks={false} />
+								<Axis placement="bottom" tickMarks={false} />
+								<Bars
+									data={dailyChartData}
+									x="label"
+									y="amount"
+									radius={4}
+									fill="var(--chart-1)"
+									tooltip
+								/>
+							</Layer>
+						</Chart>
+					</ChartContainer>
+				{/key}
+			{:else}<p class="text-sm text-black/40">沒有符合日期的費用。</p>{/if}
+		</div>
+	</section>
+
 	<!-- Settlements -->
-	{#if settlements.length > 0}
+	{#if pendingSettlements.length > 0}
 		<section class="mt-8">
 			<p class="mb-3 font-mono text-[10px] font-bold tracking-widest text-black/40">轉帳明細</p>
 			<div class="grid gap-4">
@@ -260,9 +468,12 @@
 		{/if}
 		<div class="grid gap-2">
 			{#each bills as bill (bill.id)}
+				{@const settledTransfers = settlements.filter(
+					(settlement) => settlement.isSettled && settlement.billId === bill.id
+				)}
 				<a
 					href={resolve(`/trips/${data.trip.id}/expenses/${bill.id}`)}
-					class="flex items-center gap-4 border border-black/10 bg-white p-4 transition hover:border-black/30"
+					class="flex flex-wrap items-center gap-4 border border-black/10 bg-white p-4 transition hover:border-black/30"
 				>
 					<span class="grid size-10 place-items-center bg-[#eef0eb]">
 						<CircleDollarSign class="size-5 text-[#779a00]" />
@@ -274,6 +485,29 @@
 						</span>
 					</span>
 					<span class="font-mono font-bold">{bill.currency} {bill.amount.toFixed(2)}</span>
+					{#if settledTransfers.length > 0}
+						<div class="basis-full border-t border-black/10 pt-2 text-xs text-green-700">
+							<div>
+								已付清：{#each settledTransfers as transfer, index}{#if index > 0}、{/if}{userName(
+										transfer.fromUser
+									)} → {userName(transfer.toUser)}
+									{bill.currency}{transfer.amount.toFixed(2)}{/each}
+							</div>
+							{#each settledTransfers as transfer (transfer.id)}
+								<button
+									type="button"
+									class="mt-1 font-bold underline hover:text-black"
+									onclick={(event) => {
+										event.preventDefault()
+										event.stopPropagation()
+										toggleSettled(transfer)
+									}}
+								>
+									Undo {userName(transfer.fromUser)} → {userName(transfer.toUser)}
+								</button>
+							{/each}
+						</div>
+					{/if}
 				</a>
 			{/each}
 			{#if bills.length === 0}

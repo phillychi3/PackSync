@@ -5,6 +5,11 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+	ssr: {
+		// LayerChart exposes Svelte components from its ESM entrypoint. Keep it
+		// inside Vite's SSR transform instead of letting Node load .svelte files.
+		noExternal: ['layerchart']
+	},
 	plugins: [
 		tailwindcss(),
 		sveltekit({

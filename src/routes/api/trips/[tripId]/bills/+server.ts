@@ -11,6 +11,7 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 
 	const bills = await db.query.bill.findMany({
 		where: eq(bill.tripId, params.tripId),
+		with: { payers: true, participants: true, items: true },
 		orderBy: [desc(bill.date)]
 	})
 
