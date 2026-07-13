@@ -61,8 +61,10 @@
 		"workbox-precaching": "^7.4.1"
 	},
 	"dependencies": {
+		"@tailwindcss/typography": "^0.5.20",
 		"leaflet": "^1.9.4",
 		"openai": "^6.46.0",
+		"svelte-exmarkdown": "^5.0.2",
 		"web-push": "^3.6.7"
 	}
 }

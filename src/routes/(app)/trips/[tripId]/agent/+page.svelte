@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Bot, MessageCircle, Plus, Send, Trash2 } from '@lucide/svelte'
 	import { onMount } from 'svelte'
+	import Markdown from 'svelte-exmarkdown'
+	import { gfmPlugin } from 'svelte-exmarkdown/gfm'
 	import { Button } from '$lib/components/ui/button'
 	import { Textarea } from '$lib/components/ui/textarea'
 	import type { PageData } from './$types'
@@ -21,6 +23,7 @@
 	let loading = $state(true)
 	let sending = $state(false)
 	let errorMessage = $state('')
+	const markdownPlugins = [gfmPlugin()]
 
 	async function loadConversations() {
 		loading = true
@@ -169,12 +172,19 @@
 			{#each messages as message (message.id)}
 				<div class="flex {message.role === 'user' ? 'justify-end' : 'justify-start'}">
 					<div
-						class="max-w-[85%] whitespace-pre-wrap border px-4 py-3 text-sm leading-6 {message.role ===
-						'user'
+						class="max-w-[85%] border px-4 py-3 text-sm leading-6 {message.role === 'user'
 							? 'border-black bg-black text-white'
 							: 'border-black/10 bg-[#f4f5f2]'}"
 					>
-						{message.content}
+						{#if message.role === 'assistant'}
+							<div
+								class="prose prose-sm max-w-none prose-headings:my-2 prose-p:my-1 prose-pre:my-3 prose-a:text-[#557000]"
+							>
+								<Markdown md={message.content} plugins={markdownPlugins} />
+							</div>
+						{:else}
+							<div class="whitespace-pre-wrap">{message.content}</div>
+						{/if}
 					</div>
 				</div>
 			{/each}
