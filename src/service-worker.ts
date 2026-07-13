@@ -9,6 +9,28 @@ declare const self: ServiceWorkerGlobalScope & {
 precacheAndRoute(self.__WB_MANIFEST)
 cleanupOutdatedCaches()
 
+self.addEventListener('fetch', (event) => {
+	if (event.request.method !== 'GET') return
+	const url = new URL(event.request.url)
+	const shouldCache = event.request.mode === 'navigate' || url.pathname.startsWith('/api/trips/')
+	if (!shouldCache) return
+
+	event.respondWith(
+		(async () => {
+			const cache = await caches.open('packsync-offline-v1')
+			try {
+				const response = await fetch(event.request)
+				if (response.ok) await cache.put(event.request, response.clone())
+				return response
+			} catch {
+				const cached = await cache.match(event.request)
+				if (cached) return cached
+				throw new Error('Offline response unavailable')
+			}
+		})()
+	)
+})
+
 self.addEventListener('push', (event) => {
 	let payload: { title?: string; body?: string; url?: string } = {}
 	try {

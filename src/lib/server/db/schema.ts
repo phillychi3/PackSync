@@ -93,6 +93,9 @@ export const place = sqliteTable(
 		lng: real('lng'),
 		googlePlaceId: text('google_place_id'),
 		category: text('category', { enum: ['餐廳', '景點', '住宿', '交通', '其他'] }),
+		openingHours: text('opening_hours'),
+		rating: real('rating'),
+		ratingCount: integer('rating_count'),
 		notes: text('notes'),
 		createdAt: integer('created_at', { mode: 'timestamp_ms' })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

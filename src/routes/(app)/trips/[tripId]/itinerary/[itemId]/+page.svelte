@@ -3,7 +3,13 @@
 	import { onMount } from 'svelte'
 	import type { PageData } from './$types'
 
-	type Place = { name: string; address: string | null }
+	type Place = {
+		name: string
+		address: string | null
+		openingHours: string | null
+		rating: number | null
+		ratingCount: number | null
+	}
 	type Schedule = {
 		id: string
 		date: string
@@ -93,6 +99,17 @@
 					<MapPin class="size-4" />
 					{schedule.place.name}{schedule.place.address ? ` · ${schedule.place.address}` : ''}
 				</p>
+				{#if schedule.place.openingHours || schedule.place.rating !== null}
+					<p class="mt-2 text-sm text-black/50">
+						{#if schedule.place.openingHours}營業時間：{schedule.place.openingHours}{/if}
+						{#if schedule.place.rating !== null}
+							{#if schedule.place.openingHours}
+								·
+							{/if}評價：{schedule.place.rating}
+							{#if schedule.place.ratingCount !== null}（{schedule.place.ratingCount} 則）{/if}
+						{/if}
+					</p>
+				{/if}
 			{/if}
 			{#if schedule.notes}<p class="mt-5 whitespace-pre-wrap leading-7 text-black/65">
 					{schedule.notes}

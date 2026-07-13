@@ -33,6 +33,10 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 			lng: body.lng ?? null,
 			googlePlaceId: body.googlePlaceId ?? null,
 			category: body.category ?? null,
+			openingHours: body.openingHours ?? null,
+			rating: body.rating === '' || body.rating == null ? null : Number(body.rating),
+			ratingCount:
+				body.ratingCount === '' || body.ratingCount == null ? null : Number(body.ratingCount),
 			notes: body.notes ?? null
 		})
 		.returning()

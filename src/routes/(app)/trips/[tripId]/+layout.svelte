@@ -13,10 +13,44 @@
 	} from '@lucide/svelte'
 	import type { LayoutData } from './$types'
 	import type { Snippet } from 'svelte'
+	import { onMount } from 'svelte'
 
 	let { data, children }: { data: LayoutData; children: Snippet } = $props()
 	const route = resolve as unknown as (path: string) => string
 	const base = $derived(`/trips/${data.trip.id}`)
+	type InstallPromptEvent = Event & {
+		prompt: () => Promise<void>
+		userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+	}
+	let installPrompt = $state<InstallPromptEvent | null>(null)
+	let canInstall = $state(false)
+
+	onMount(() => {
+		if (window.matchMedia('(display-mode: standalone)').matches) return
+		const handleInstallPrompt = (event: Event) => {
+			event.preventDefault()
+			installPrompt = event as InstallPromptEvent
+			canInstall = true
+		}
+		const handleInstalled = () => {
+			installPrompt = null
+			canInstall = false
+		}
+		window.addEventListener('beforeinstallprompt', handleInstallPrompt)
+		window.addEventListener('appinstalled', handleInstalled)
+		return () => {
+			window.removeEventListener('beforeinstallprompt', handleInstallPrompt)
+			window.removeEventListener('appinstalled', handleInstalled)
+		}
+	})
+
+	async function installApp() {
+		if (!installPrompt) return
+		await installPrompt.prompt()
+		await installPrompt.userChoice
+		installPrompt = null
+		canInstall = false
+	}
 	const links = $derived([
 		{ href: base, label: '總覽', icon: Map },
 		{ href: `${base}/itinerary`, label: '行程', icon: CalendarDays },
@@ -51,6 +85,16 @@
 					</p>{/if}
 			</div>
 			<div class="flex shrink-0 items-center gap-2">
+				{#if canInstall}
+					<button
+						type="button"
+						onclick={installApp}
+						class="border border-black/15 bg-white px-2 py-1 text-xs font-bold hover:border-black"
+						title="安裝 PackSync"
+					>
+						安裝 App
+					</button>
+				{/if}
 				<!-- eslint-disable svelte/no-navigation-without-resolve -->
 				<a
 					href={route(`${base}/notifications`)}

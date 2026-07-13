@@ -13,6 +13,7 @@
 	import { Button } from '$lib/components/ui/button'
 	import { Input } from '$lib/components/ui/input'
 	import { Textarea } from '$lib/components/ui/textarea'
+	import { setCriticalItems, setItinerary, setTripContext } from '$lib/stores/trip'
 	import { onMount } from 'svelte'
 	import type { PageData } from './$types'
 
@@ -23,6 +24,9 @@
 		lat: number | null
 		lng: number | null
 		category: string | null
+		openingHours: string | null
+		rating: number | null
+		ratingCount: number | null
 	}
 	type Item = {
 		id: string
@@ -63,6 +67,7 @@
 		placeId: ''
 	})
 	let saving = $state(false)
+	let placeDetails = $state({ openingHours: '', rating: '', ratingCount: '' })
 
 	// Place search state
 	let newPlace = $state({
@@ -155,14 +160,21 @@
 	}
 
 	async function load() {
+		setTripContext(data.trip.id)
 		const [itemsRes, placesRes, criticalRes] = await Promise.all([
 			fetch(`/api/trips/${data.trip.id}/itinerary`),
 			fetch(`/api/trips/${data.trip.id}/places`),
 			fetch(`/api/trips/${data.trip.id}/critical`)
 		])
-		if (itemsRes.ok) items = await itemsRes.json()
+		if (itemsRes.ok) {
+			items = await itemsRes.json()
+			setItinerary(items)
+		}
 		if (placesRes.ok) places = await placesRes.json()
-		if (criticalRes.ok) criticalItems = await criticalRes.json()
+		if (criticalRes.ok) {
+			criticalItems = await criticalRes.json()
+			setCriticalItems(criticalItems)
+		}
 	}
 
 	function onSearchInput() {
@@ -190,7 +202,8 @@
 				name: result.name,
 				address: result.displayName,
 				lat: result.lat,
-				lng: result.lng
+				lng: result.lng,
+				...placeDetails
 			})
 		})
 		if (res.ok) {
@@ -199,6 +212,7 @@
 			if (newPlace.forEdit) editForm.placeId = p.id
 			else form.placeId = p.id
 			newPlace = { show: false, forEdit: false, query: '', results: [], searching: false }
+			placeDetails = { openingHours: '', rating: '', ratingCount: '' }
 		}
 	}
 
@@ -208,7 +222,7 @@
 		const res = await fetch(`/api/trips/${data.trip.id}/places`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ name })
+			body: JSON.stringify({ name, ...placeDetails })
 		})
 		if (res.ok) {
 			const p: Place = await res.json()
@@ -216,6 +230,7 @@
 			if (newPlace.forEdit) editForm.placeId = p.id
 			else form.placeId = p.id
 			newPlace = { show: false, forEdit: false, query: '', results: [], searching: false }
+			placeDetails = { openingHours: '', rating: '', ratingCount: '' }
 		}
 	}
 
@@ -271,6 +286,7 @@
 
 	function openNewPlace(forEdit: boolean) {
 		newPlace = { show: true, forEdit, query: '', results: [], searching: false }
+		placeDetails = { openingHours: '', rating: '', ratingCount: '' }
 	}
 
 	onMount(() => {
@@ -419,6 +435,29 @@
 															class="rounded-none border-black/20 bg-white pr-8"
 															oninput={onSearchInput}
 														/>
+														<div class="mt-2 grid gap-2 sm:grid-cols-3">
+															<Input
+																bind:value={placeDetails.openingHours}
+																placeholder="營業時間"
+																class="rounded-none border-black/20 bg-white"
+															/>
+															<Input
+																bind:value={placeDetails.rating}
+																type="number"
+																min="0"
+																max="5"
+																step="0.1"
+																placeholder="評價 0–5"
+																class="rounded-none border-black/20 bg-white"
+															/>
+															<Input
+																bind:value={placeDetails.ratingCount}
+																type="number"
+																min="0"
+																placeholder="評價數"
+																class="rounded-none border-black/20 bg-white"
+															/>
+														</div>
 														{#if newPlace.searching}
 															<span
 																class="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-black/40"
@@ -493,6 +532,15 @@
 														? ` · ${item.place.address.split(',')[0]}`
 														: ''}
 												</p>
+												{#if item.place.openingHours || item.place.rating !== null}
+													<p class="mt-1 text-xs text-black/45">
+														{#if item.place.openingHours}營業 {item.place.openingHours}{/if}
+														{#if item.place.rating !== null}
+															· 評價 {item.place.rating}{#if item.place.ratingCount !== null}
+																({item.place.ratingCount}){/if}
+														{/if}
+													</p>
+												{/if}
 											{/if}
 											{#if item.notes}
 												<p class="mt-1 text-sm leading-6 text-black/55">{item.notes}</p>
@@ -627,6 +675,29 @@
 								class="rounded-none border-black/20 bg-white pr-8"
 								oninput={onSearchInput}
 							/>
+							<div class="mt-2 grid gap-2 sm:grid-cols-3">
+								<Input
+									bind:value={placeDetails.openingHours}
+									placeholder="營業時間"
+									class="rounded-none border-black/20 bg-white"
+								/>
+								<Input
+									bind:value={placeDetails.rating}
+									type="number"
+									min="0"
+									max="5"
+									step="0.1"
+									placeholder="評價 0–5"
+									class="rounded-none border-black/20 bg-white"
+								/>
+								<Input
+									bind:value={placeDetails.ratingCount}
+									type="number"
+									min="0"
+									placeholder="評價數"
+									class="rounded-none border-black/20 bg-white"
+								/>
+							</div>
 							{#if newPlace.searching}
 								<span
 									class="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-black/40"
