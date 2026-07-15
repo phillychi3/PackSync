@@ -8,6 +8,7 @@
 	import UserAvatar from '$lib/components/user-avatar.svelte'
 	import { confirmDialog } from '$lib/stores/confirm'
 	import { toast } from '$lib/stores/toast'
+	import { offlineFetch } from '$lib/offline-fetch'
 	import type { PageData } from './$types'
 	type Member = {
 		id: string
@@ -56,10 +57,10 @@
 	}
 
 	async function load() {
-		const response = await fetch(`/api/trips/${data.trip.id}/members`)
+		const response = await offlineFetch(`/api/trips/${data.trip.id}/members`)
 		if (response.ok) members = await response.json()
 		if (canManage) {
-			const inviteResponse = await fetch(`/api/trips/${data.trip.id}/invite`)
+			const inviteResponse = await offlineFetch(`/api/trips/${data.trip.id}/invite`)
 			if (inviteResponse.ok) invites = await inviteResponse.json()
 		}
 	}

@@ -7,6 +7,7 @@
 	import { Textarea } from '$lib/components/ui/textarea'
 	import { confirmDialog } from '$lib/stores/confirm'
 	import { toast } from '$lib/stores/toast'
+	import { offlineFetch } from '$lib/offline-fetch'
 	import type { PageData } from './$types'
 
 	type Conversation = { id: string; title: string; updatedAt: string | number | Date }
@@ -77,7 +78,7 @@
 
 	async function loadConversations() {
 		loading = true
-		const response = await fetch(`/api/trips/${data.trip.id}/agent`)
+		const response = await offlineFetch(`/api/trips/${data.trip.id}/agent`)
 		if (response.ok) {
 			conversations = await response.json()
 			if (conversations[0]) await selectConversation(conversations[0].id)
@@ -87,7 +88,7 @@
 
 	async function selectConversation(id: string) {
 		selectedId = id
-		const response = await fetch(`/api/trips/${data.trip.id}/agent/${id}`)
+		const response = await offlineFetch(`/api/trips/${data.trip.id}/agent/${id}`)
 		if (response.ok) {
 			const payload = await response.json()
 			messages = payload.messages

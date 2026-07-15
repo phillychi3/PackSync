@@ -6,6 +6,7 @@
 	import { Input } from '$lib/components/ui/input'
 	import { confirmDialog } from '$lib/stores/confirm'
 	import { toast } from '$lib/stores/toast'
+	import { offlineFetch } from '$lib/offline-fetch'
 	import type { PageData } from './$types'
 	type Item = {
 		id: string
@@ -25,7 +26,7 @@
 	let selectedList = $state('')
 	let selectedListData = $derived(lists.find((list) => list.id === selectedList))
 	async function load() {
-		const response = await fetch(`/api/trips/${data.trip.id}/packing`)
+		const response = await offlineFetch(`/api/trips/${data.trip.id}/packing`)
 		if (response.ok) {
 			lists = await response.json()
 			selectedList = lists[0]?.id ?? ''

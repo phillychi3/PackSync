@@ -8,6 +8,7 @@
 	import { Button } from '$lib/components/ui/button'
 	import UserAvatar from '$lib/components/user-avatar.svelte'
 	import { toast } from '$lib/stores/toast'
+	import { offlineFetch } from '$lib/offline-fetch'
 	import type { PageData } from './$types'
 
 	type Bill = {
@@ -175,10 +176,10 @@
 
 	async function load() {
 		const [billsRes, settlementsRes, calculationRes, membersRes] = await Promise.all([
-			fetch(`/api/trips/${data.trip.id}/bills`),
-			fetch(`/api/trips/${data.trip.id}/settlements`),
-			fetch(`/api/trips/${data.trip.id}/settlements/calculate`),
-			fetch(`/api/trips/${data.trip.id}/members`)
+			offlineFetch(`/api/trips/${data.trip.id}/bills`),
+			offlineFetch(`/api/trips/${data.trip.id}/settlements`),
+			offlineFetch(`/api/trips/${data.trip.id}/settlements/calculate`),
+			offlineFetch(`/api/trips/${data.trip.id}/members`)
 		])
 		const loadedBills: Bill[] = billsRes.ok ? await billsRes.json() : []
 		const loadedSettlements: Settlement[] = settlementsRes.ok ? await settlementsRes.json() : []

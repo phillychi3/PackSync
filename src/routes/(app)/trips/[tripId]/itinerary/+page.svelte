@@ -21,6 +21,7 @@
 	import { Textarea } from '$lib/components/ui/textarea'
 	import { confirmDialog } from '$lib/stores/confirm'
 	import { toast } from '$lib/stores/toast'
+	import { offlineFetch } from '$lib/offline-fetch'
 	import { setCriticalItems, setItinerary, setTripContext } from '$lib/stores/trip'
 	import { onMount } from 'svelte'
 	import type { PageData } from './$types'
@@ -298,9 +299,9 @@
 	async function load() {
 		setTripContext(data.trip.id)
 		const [itemsRes, placesRes, criticalRes] = await Promise.all([
-			fetch(`/api/trips/${data.trip.id}/itinerary`),
-			fetch(`/api/trips/${data.trip.id}/places`),
-			fetch(`/api/trips/${data.trip.id}/critical`)
+			offlineFetch(`/api/trips/${data.trip.id}/itinerary`),
+			offlineFetch(`/api/trips/${data.trip.id}/places`),
+			offlineFetch(`/api/trips/${data.trip.id}/critical`)
 		])
 		if (itemsRes.ok) {
 			items = await itemsRes.json()

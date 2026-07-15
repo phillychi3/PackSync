@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button'
 	import { Input } from '$lib/components/ui/input'
 	import { toast } from '$lib/stores/toast'
+	import { offlineFetch } from '$lib/offline-fetch'
 	import { onMount } from 'svelte'
 	import type { PageData } from './$types'
 	type Todo = { id: string; title: string; dueDate: string | null; isCompleted: boolean }
@@ -42,7 +43,7 @@
 	})
 
 	async function load() {
-		const response = await fetch(`/api/trips/${data.trip.id}/todos`)
+		const response = await offlineFetch(`/api/trips/${data.trip.id}/todos`)
 		if (response.ok) todos = await response.json()
 	}
 	async function add(event: SubmitEvent) {

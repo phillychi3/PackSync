@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { preloadCode } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import { Button } from '$lib/components/ui/button'
 	import { Card, CardContent } from '$lib/components/ui/card'
+	import { isNetworkReachable } from '$lib/network'
 	import { CalendarDays, MapPin, Plane, Plus, Settings, Users } from '@lucide/svelte'
 	import type { PageData } from './$types'
+	import { onMount } from 'svelte'
 
 	let { data }: { data: PageData } = $props()
 
@@ -16,6 +19,77 @@
 	const activeTrips = $derived(
 		data.trips.filter((trip) => trip.status === 'planning' || trip.status === 'ongoing').length
 	)
+	const offlineSections = [
+		'itinerary',
+		'packing',
+		'expenses',
+		'todos',
+		'critical',
+		'members',
+		'agent',
+		'notifications'
+	]
+	const offlineResources = [
+		'itinerary',
+		'places',
+		'critical',
+		'packing',
+		'bills',
+		'settlements',
+		'settlements/calculate',
+		'members',
+		'todos',
+		'notifications',
+		'agent'
+	]
+
+	function offlineUrls(tripId: string) {
+		const base = `/trips/${tripId}`
+		const apiBase = `/api/trips/${tripId}`
+
+		return [
+			base,
+			...offlineSections.map((section) => `${base}/${section}`),
+			`${base}/__data.json`,
+			...offlineSections.map((section) => `${base}/${section}/__data.json`),
+			...offlineResources.map((resource) => `${apiBase}/${resource}`)
+		]
+	}
+
+	async function warmOfflineCache() {
+		const cache = await caches.open('packsync-offline-v1')
+		const urls = data.trips.flatMap((trip) => offlineUrls(trip.id))
+		await Promise.allSettled(
+			data.trips.flatMap((trip) => {
+				const base = `/trips/${trip.id}`
+				return [base, ...offlineSections.map((section) => `${base}/${section}`)].map((path) =>
+					preloadCode(path)
+				)
+			})
+		)
+		await Promise.allSettled(
+			urls.map(async (url) => {
+				const isDocument = url.startsWith('/trips/') && !url.endsWith('/__data.json')
+				const request = new Request(url, {
+					credentials: 'same-origin',
+					headers: isDocument ? { accept: 'text/html' } : undefined
+				})
+				const response = await fetch(request)
+				if (!response.ok) return false
+				await cache.put(request, response)
+				return true
+			})
+		)
+	}
+
+	onMount(() => {
+		void isNetworkReachable().then((online) => {
+			if (online) void warmOfflineCache()
+		})
+
+		// Write responses into Cache Storage directly so warming does not depend on
+		// whether the active service worker controls this particular tab yet.
+	})
 
 	function formatDate(value: string | null) {
 		if (!value) return '尚未設定'

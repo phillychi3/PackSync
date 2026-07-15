@@ -23,6 +23,7 @@ type OutboxEntry = {
 const OUTBOX_DB = 'packsync-outbox'
 const OUTBOX_STORE = 'requests'
 const QUEUEABLE_METHODS = ['PUT', 'PATCH', 'DELETE']
+const OFFLINE_CACHE = 'packsync-offline-v1'
 
 function openOutbox(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
@@ -102,7 +103,8 @@ async function replayOutbox() {
 }
 
 self.addEventListener('message', (event) => {
-	if ((event.data as { type?: string } | null)?.type === 'replay-outbox') {
+	const data = event.data as { type?: string } | null
+	if (data?.type === 'replay-outbox') {
 		event.waitUntil(replayOutbox())
 	}
 })
@@ -137,18 +139,48 @@ self.addEventListener('fetch', (event) => {
 		return
 	}
 
-	const shouldCache = event.request.mode === 'navigate' || url.pathname.startsWith('/api/trips/')
+	// SvelteKit client-side navigations fetch route data from `__data.json` instead of
+	// issuing a document navigation. Cache those responses too, otherwise clicking a
+	// trip while offline bypasses this handler and SvelteKit renders its 500 page.
+	const isSvelteKitData =
+		url.origin === self.location.origin && url.pathname.endsWith('/__data.json')
+	const isStaticAsset =
+		url.origin === self.location.origin &&
+		['script', 'style', 'font', 'image'].includes(event.request.destination)
+	const shouldCache =
+		event.request.mode === 'navigate' ||
+		url.pathname.startsWith('/api/trips/') ||
+		isSvelteKitData ||
+		isStaticAsset
 	if (!shouldCache) return
 
 	event.respondWith(
 		(async () => {
-			const cache = await caches.open('packsync-offline-v1')
+			const cache = await caches.open(OFFLINE_CACHE)
+			const matchCached = () =>
+				cache.match(event.request).then(async (cached) => {
+					if (cached) return cached
+					if (isSvelteKitData) {
+						return cache.match(event.request, { ignoreSearch: true })
+					}
+					if (event.request.mode === 'navigate') {
+						return cache.match(event.request, { ignoreVary: true })
+					}
+					return undefined
+				})
 			try {
 				const response = await fetch(event.request)
-				if (response.ok) await cache.put(event.request, response.clone())
-				return response
+				if (response.ok) {
+					await cache.put(event.request, response.clone())
+					return response
+				}
+
+				// DevTools Offline and some development proxies resolve fetches with a
+				// 5xx response instead of rejecting. Treat that as a network failure when
+				// a previously successful response is available.
+				return (await matchCached()) ?? response
 			} catch {
-				const cached = await cache.match(event.request)
+				const cached = await matchCached()
 				if (cached) return cached
 				throw new Error('Offline response unavailable')
 			}

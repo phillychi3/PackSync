@@ -7,6 +7,7 @@
 	import { Textarea } from '$lib/components/ui/textarea'
 	import { confirmDialog } from '$lib/stores/confirm'
 	import { toast } from '$lib/stores/toast'
+	import { offlineFetch } from '$lib/offline-fetch'
 	import type { PageData } from './$types'
 	type Critical = {
 		id: string
@@ -94,9 +95,9 @@
 
 	async function load() {
 		const [response, scheduleResponse, memberResponse] = await Promise.all([
-			fetch(`/api/trips/${data.trip.id}/critical`),
-			fetch(`/api/trips/${data.trip.id}/itinerary`),
-			fetch(`/api/trips/${data.trip.id}/members`)
+			offlineFetch(`/api/trips/${data.trip.id}/critical`),
+			offlineFetch(`/api/trips/${data.trip.id}/itinerary`),
+			offlineFetch(`/api/trips/${data.trip.id}/members`)
 		])
 		if (response.ok) items = await response.json()
 		if (scheduleResponse.ok) scheduleItems = await scheduleResponse.json()

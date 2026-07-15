@@ -3,6 +3,7 @@
 	import { WifiOff } from '@lucide/svelte'
 	import ConfirmDialog from '$lib/components/confirm-dialog.svelte'
 	import Toaster from '$lib/components/toaster.svelte'
+	import { isNetworkReachable } from '$lib/network'
 	import { toast } from '$lib/stores/toast'
 	import { onMount } from 'svelte'
 
@@ -21,13 +22,20 @@
 				minute: '2-digit'
 			}).format(new Date())
 		}
-		if (!navigator.onLine) markOffline()
-		const handleOnline = () => {
+		const refreshConnectivity = async (showRestored = false) => {
+			const online = await isNetworkReachable()
+			if (!online) {
+				markOffline()
+				return
+			}
+			const wasOffline = offline
 			offline = false
 			offlineSince = null
-			toast.success('已恢復連線')
+			if (showRestored || wasOffline) toast.success('已恢復連線')
 			navigator.serviceWorker?.controller?.postMessage({ type: 'replay-outbox' })
 		}
+		void refreshConnectivity()
+		const handleOnline = () => void refreshConnectivity(true)
 		window.addEventListener('online', handleOnline)
 		window.addEventListener('offline', markOffline)
 
