@@ -16,13 +16,41 @@ function str(value: unknown): string | null {
 	return typeof value === 'string' && value.trim() ? value : null
 }
 
+function num(value: unknown): number | null {
+	return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+const TRANSPORT_MODES = ['walk', 'transit', 'drive', 'flight', 'boat'] as const
+type TransportMode = (typeof TRANSPORT_MODES)[number]
+
+function transportMode(value: unknown): TransportMode | null {
+	return typeof value === 'string' && (TRANSPORT_MODES as readonly string[]).includes(value)
+		? (value as TransportMode)
+		: null
+}
+
 export function summarizeAction(tool: string, args: Record<string, unknown>): string {
 	switch (tool) {
 		case 'create_itinerary':
 			return `新增行程：${args.date ?? ''} ${args.startTime ?? ''} ${args.title ?? ''}`.trim()
+		case 'import_itinerary': {
+			const items = Array.isArray(args.items) ? args.items : []
+			const dates = items
+				.map((item) => str((item as Record<string, unknown>).date))
+				.filter((date): date is string => date !== null)
+				.sort()
+			const range =
+				dates.length > 0
+					? dates[0] === dates[dates.length - 1]
+						? dates[0]
+						: `${dates[0]} ~ ${dates[dates.length - 1]}`
+					: ''
+			return `批次匯入 ${items.length} 筆行程${range ? `（${range}）` : ''}`
+		}
 		case 'update_itinerary': {
-			const fields = ['date', 'startTime', 'endTime', 'title', 'notes']
+			const fields = ['date', 'startTime', 'endTime', 'title', 'notes', 'transportMode']
 				.filter((key) => str(args[key]) !== null)
+				.concat(num(args.order) !== null ? ['order'] : [])
 				.join('、')
 			return `修改行程（${fields || '無變更欄位'}）`
 		}
@@ -80,11 +108,41 @@ export async function executeAgentAction(action: AgentActionRow): Promise<string
 				startTime: str(args.startTime),
 				endTime: str(args.endTime),
 				notes: str(args.notes),
+				transportMode: transportMode(args.transportMode),
 				placeId,
-				order: 0
+				order: num(args.order) ?? 0
 			})
 			.returning()
 		return JSON.stringify({ createdId: created.id, table: 'schedule_item' })
+	}
+
+	if (action.tool === 'import_itinerary') {
+		const items = Array.isArray(args.items) ? (args.items as Record<string, unknown>[]) : []
+		if (items.length === 0) throw new Error('提案沒有可匯入的行程')
+		const createdIds: string[] = []
+		for (const item of items) {
+			const date = str(item.date)
+			const title = str(item.title)
+			if (!date || !title) continue
+			const placeId = await resolvePlaceId(action.tripId, item.placeName)
+			const [created] = await db
+				.insert(scheduleItem)
+				.values({
+					tripId: action.tripId,
+					date,
+					title,
+					startTime: str(item.startTime),
+					endTime: str(item.endTime),
+					notes: str(item.notes),
+					transportMode: transportMode(item.transportMode),
+					placeId,
+					order: num(item.order) ?? 0
+				})
+				.returning()
+			createdIds.push(created.id)
+		}
+		if (createdIds.length === 0) throw new Error('沒有任何行程包含有效的日期與標題')
+		return JSON.stringify({ createdIds, table: 'schedule_item' })
 	}
 
 	if (action.tool === 'update_itinerary') {
@@ -99,7 +157,9 @@ export async function executeAgentAction(action: AgentActionRow): Promise<string
 			startTime: existing.startTime,
 			endTime: existing.endTime,
 			title: existing.title,
-			notes: existing.notes
+			notes: existing.notes,
+			transportMode: existing.transportMode,
+			order: existing.order
 		}
 		await db
 			.update(scheduleItem)
@@ -108,7 +168,11 @@ export async function executeAgentAction(action: AgentActionRow): Promise<string
 				...(str(args.title) && { title: str(args.title)! }),
 				...(str(args.startTime) !== null && { startTime: str(args.startTime) }),
 				...(str(args.endTime) !== null && { endTime: str(args.endTime) }),
-				...(str(args.notes) !== null && { notes: str(args.notes) })
+				...(str(args.notes) !== null && { notes: str(args.notes) }),
+				...(transportMode(args.transportMode) !== null && {
+					transportMode: transportMode(args.transportMode)
+				}),
+				...(num(args.order) !== null && { order: num(args.order)! })
 			})
 			.where(eq(scheduleItem.id, id))
 		return JSON.stringify({ updatedId: id, previous })
@@ -157,6 +221,13 @@ export async function undoAgentAction(action: AgentActionRow): Promise<void> {
 		await db.delete(scheduleItem).where(eq(scheduleItem.id, String(undo.createdId)))
 		return
 	}
+	if (action.tool === 'import_itinerary') {
+		const ids = Array.isArray(undo.createdIds) ? (undo.createdIds as string[]) : []
+		for (const id of ids) {
+			await db.delete(scheduleItem).where(eq(scheduleItem.id, id))
+		}
+		return
+	}
 	if (action.tool === 'create_todo') {
 		await db.delete(todo).where(eq(todo.id, String(undo.createdId)))
 		return
@@ -172,6 +243,8 @@ export async function undoAgentAction(action: AgentActionRow): Promise<void> {
 			endTime: string | null
 			title: string
 			notes: string | null
+			transportMode: TransportMode | null
+			order: number
 		}
 		await db
 			.update(scheduleItem)
