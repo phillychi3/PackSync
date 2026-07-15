@@ -66,7 +66,7 @@ export async function calculateSettlements(tripId: string) {
 			}
 		} else {
 			for (const p of b.participants) {
-				let owed = 0
+				let owed: number
 				if (b.splitMethod === 'equal') owed = totalPaid / b.participants.length
 				else if (b.splitMethod === 'percentage') owed = totalPaid * ((p.value ?? 0) / 100)
 				else owed = p.value ?? 0 // fixed
@@ -162,7 +162,7 @@ export async function addSettlementDetails<
 		}
 
 		for (const participant of b.participants) {
-			let amount = 0
+			let amount: number
 			if (b.splitMethod === 'equal') amount = totalPaid / b.participants.length
 			else if (b.splitMethod === 'percentage') amount = totalPaid * ((participant.value ?? 0) / 100)
 			else amount = participant.value ?? 0

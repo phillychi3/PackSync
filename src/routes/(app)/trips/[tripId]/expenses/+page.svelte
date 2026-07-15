@@ -6,6 +6,8 @@
 	import type { ChartConfig } from '$lib/components/ui/chart'
 	import { onMount } from 'svelte'
 	import { Button } from '$lib/components/ui/button'
+	import UserAvatar from '$lib/components/user-avatar.svelte'
+	import { toast } from '$lib/stores/toast'
 	import type { PageData } from './$types'
 
 	type Bill = {
@@ -207,6 +209,9 @@
 				calculatedBalances = calculation.balances
 			}
 			calculated = true
+			toast.success('結算已重新計算')
+		} else {
+			toast.error('重新計算失敗，請稍後再試')
 		}
 		recalculating = false
 	}
@@ -221,6 +226,8 @@
 			const updated = await res.json()
 			const idx = settlements.findIndex((x) => x.id === s.id)
 			if (idx >= 0) settlements[idx] = { ...settlements[idx], isSettled: updated.isSettled }
+		} else {
+			toast.error('更新結算狀態失敗，請稍後再試')
 		}
 	}
 
@@ -252,12 +259,14 @@
 				<RefreshCw class="size-4 {recalculating ? 'animate-spin' : ''}" />
 				重新計算
 			</Button>
-			<Button
-				href={resolve(`/trips/${data.trip.id}/expenses/new`)}
-				class="h-11 rounded-none bg-[#d8ff36] font-bold text-black hover:bg-[#c8ef28]"
-			>
-				<Plus class="size-4" /> 新增費用
-			</Button>
+			{#if data.trip.status !== 'completed'}
+				<Button
+					href={resolve(`/trips/${data.trip.id}/expenses/new`)}
+					class="h-11 rounded-none bg-[#d8ff36] font-bold text-black hover:bg-[#c8ef28]"
+				>
+					<Plus class="size-4" /> 新增費用
+				</Button>
+			{/if}
 		</div>
 	</div>
 
@@ -411,8 +420,18 @@
 								>
 									<span class="min-w-0 flex-1">
 										<span class="flex items-center gap-2 text-sm font-bold">
+											<UserAvatar
+												name={userName(s.fromUser)}
+												image={s.fromUser.image}
+												class="size-6 text-[10px]"
+											/>
 											<span class="truncate">{userName(s.fromUser)}</span>
 											<ArrowRight class="size-3.5 shrink-0 text-black/40" />
+											<UserAvatar
+												name={userName(s.toUser)}
+												image={s.toUser.image}
+												class="size-6 text-[10px]"
+											/>
 											<span class="truncate">{userName(s.toUser)}</span>
 										</span>
 										{#if s.fromUserId === data.user.id}

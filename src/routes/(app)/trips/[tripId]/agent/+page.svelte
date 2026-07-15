@@ -5,6 +5,8 @@
 	import { gfmPlugin } from 'svelte-exmarkdown/gfm'
 	import { Button } from '$lib/components/ui/button'
 	import { Textarea } from '$lib/components/ui/textarea'
+	import { confirmDialog } from '$lib/stores/confirm'
+	import { toast } from '$lib/stores/toast'
 	import type { PageData } from './$types'
 
 	type Conversation = { id: string; title: string; updatedAt: string | number | Date }
@@ -14,16 +16,64 @@
 		content: string
 		createdAt: string | number | Date
 	}
+	type AgentAction = {
+		id: string
+		messageId: string | null
+		tool: string
+		status: 'proposed' | 'executed' | 'cancelled' | 'undone'
+		summary: string
+		args: Record<string, unknown>
+	}
 
 	let { data }: { data: PageData } = $props()
 	let conversations = $state<Conversation[]>([])
 	let messages = $state<Message[]>([])
+	let actions = $state<AgentAction[]>([])
 	let selectedId = $state('')
 	let input = $state('')
 	let loading = $state(true)
 	let sending = $state(false)
+	let deciding = $state(false)
 	let errorMessage = $state('')
 	const markdownPlugins = [gfmPlugin()]
+
+	const STATUS_LABELS: Record<AgentAction['status'], string> = {
+		proposed: '待確認',
+		executed: '已執行',
+		cancelled: '已取消',
+		undone: '已復原'
+	}
+
+	function messageActions(messageId: string) {
+		return actions.filter((action) => action.messageId === messageId)
+	}
+
+	async function decide(action: AgentAction, decision: 'confirm' | 'cancel' | 'undo') {
+		if (deciding) return
+		deciding = true
+		const response = await fetch(`/api/trips/${data.trip.id}/agent/actions/${action.id}`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ decision })
+		})
+		if (response.ok) {
+			const updated: AgentAction = await response.json()
+			actions = actions.map((entry) => (entry.id === updated.id ? updated : entry))
+			if (decision === 'confirm') {
+				toast.success('變更已執行', {
+					action: { label: '復原', onClick: () => decide(updated, 'undo') }
+				})
+			} else if (decision === 'cancel') {
+				toast.info('已取消提案')
+			} else {
+				toast.success('變更已復原')
+			}
+		} else {
+			const body = await response.json().catch(() => null)
+			toast.error(body?.message ?? '操作失敗，請稍後再試')
+		}
+		deciding = false
+	}
 
 	async function loadConversations() {
 		loading = true
@@ -38,7 +88,11 @@
 	async function selectConversation(id: string) {
 		selectedId = id
 		const response = await fetch(`/api/trips/${data.trip.id}/agent/${id}`)
-		if (response.ok) messages = (await response.json()).messages
+		if (response.ok) {
+			const payload = await response.json()
+			messages = payload.messages
+			actions = payload.actions ?? []
+		}
 	}
 
 	async function createConversation() {
@@ -58,10 +112,19 @@
 	}
 
 	async function deleteConversation(id: string) {
-		if (!confirm('確定要刪除這段對話嗎？')) return
+		const ok = await confirmDialog({
+			title: '刪除對話',
+			message: '確定要刪除這段對話嗎？聊天紀錄將無法復原。',
+			confirmLabel: '刪除',
+			danger: true
+		})
+		if (!ok) return
 
 		const response = await fetch(`/api/trips/${data.trip.id}/agent/${id}`, { method: 'DELETE' })
-		if (!response.ok) return
+		if (!response.ok) {
+			toast.error('刪除對話失敗，請稍後再試')
+			return
+		}
 
 		conversations = conversations.filter((conversation) => conversation.id !== id)
 		if (selectedId !== id) return
@@ -88,6 +151,7 @@
 		if (response.ok) {
 			const result = await response.json()
 			messages = [...messages, result.userMessage, result.assistantMessage]
+			if (result.proposals?.length) actions = [...actions, ...result.proposals]
 			await loadConversations()
 		} else {
 			errorMessage =
@@ -187,6 +251,62 @@
 						{/if}
 					</div>
 				</div>
+				{#if message.role === 'assistant'}
+					{#each messageActions(message.id) as action (action.id)}
+						<div class="flex justify-start">
+							<div
+								class="w-full max-w-[85%] border px-4 py-3 {action.status === 'proposed'
+									? 'border-[#779a00] bg-[#fbffe8]'
+									: 'border-black/10 bg-white'}"
+							>
+								<div class="flex items-center justify-between gap-3">
+									<p class="min-w-0 flex-1 truncate text-sm font-bold">{action.summary}</p>
+									<span
+										class="shrink-0 px-2 py-0.5 font-mono text-[10px] font-bold {action.status ===
+										'proposed'
+											? 'bg-[#d8ff36] text-black'
+											: action.status === 'executed'
+												? 'bg-[#151817] text-white'
+												: 'bg-[#eef0eb] text-black/60'}"
+									>
+										{STATUS_LABELS[action.status]}
+									</span>
+								</div>
+								{#if action.status === 'proposed'}
+									<div class="mt-3 flex gap-2">
+										<button
+											type="button"
+											disabled={deciding}
+											class="border border-black bg-[#d8ff36] px-3 py-1.5 text-xs font-bold hover:bg-[#c8ef28] disabled:opacity-50"
+											onclick={() => decide(action, 'confirm')}
+										>
+											確認執行
+										</button>
+										<button
+											type="button"
+											disabled={deciding}
+											class="border border-black/20 px-3 py-1.5 text-xs font-bold text-black/60 hover:border-black hover:text-black disabled:opacity-50"
+											onclick={() => decide(action, 'cancel')}
+										>
+											取消
+										</button>
+									</div>
+								{:else if action.status === 'executed'}
+									<div class="mt-3">
+										<button
+											type="button"
+											disabled={deciding}
+											class="border border-black/20 px-3 py-1.5 text-xs font-bold text-black/60 hover:border-black hover:text-black disabled:opacity-50"
+											onclick={() => decide(action, 'undo')}
+										>
+											復原這項變更
+										</button>
+									</div>
+								{/if}
+							</div>
+						</div>
+					{/each}
+				{/if}
 			{/each}
 			{#if sending}<div class="text-sm text-black/45">AI 正在整理旅程資料…</div>{/if}
 			{#if errorMessage}<p class="border border-red-200 bg-red-50 p-3 text-sm text-red-700">

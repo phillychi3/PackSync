@@ -10,13 +10,30 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	const admin = await requireAdmin(authUser.id, params.tripId)
 
 	const body = await request.json()
-	if (!['admin', 'member'].includes(body.role)) throw error(400, 'Invalid role')
+	if (!['owner', 'admin', 'member'].includes(body.role)) throw error(400, 'Invalid role')
 
 	const target = await db.query.tripMember.findFirst({
 		where: and(eq(tripMember.tripId, params.tripId), eq(tripMember.userId, params.userId))
 	})
 	if (!target) throw error(404, 'Member not found')
 	if (target.role === 'owner') throw error(403, 'Cannot change owner role')
+
+	if (body.role === 'owner') {
+		if (admin.role !== 'owner') throw error(403, 'Only owner can transfer ownership')
+		const [updated] = await db.transaction(async (tx) => {
+			await tx
+				.update(tripMember)
+				.set({ role: 'admin' })
+				.where(and(eq(tripMember.tripId, params.tripId), eq(tripMember.userId, authUser.id)))
+			return tx
+				.update(tripMember)
+				.set({ role: 'owner' })
+				.where(and(eq(tripMember.tripId, params.tripId), eq(tripMember.userId, params.userId)))
+				.returning()
+		})
+		return json(updated)
+	}
+
 	if (body.role === 'admin' && admin.role !== 'owner') throw error(403, 'Only owner can set admin')
 
 	const [updated] = await db

@@ -1,9 +1,10 @@
 import { json, error } from '@sveltejs/kit'
 import type { RequestHandler } from './$types'
 import { db } from '$lib/server/db'
-import { conversation } from '$lib/server/db/schema'
+import { agentAction, conversation } from '$lib/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireAuth, requireMember } from '$lib/server/api'
+import { describeAction } from '$lib/server/agent-actions'
 
 export const GET: RequestHandler = async ({ locals, params }) => {
 	const user = requireAuth(locals)
@@ -18,7 +19,11 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 		throw error(404, 'Conversation not found')
 	}
 
-	return json(conv)
+	const actions = await db.query.agentAction.findMany({
+		where: eq(agentAction.conversationId, params.convId)
+	})
+
+	return json({ ...conv, actions: actions.map(describeAction) })
 }
 
 export const DELETE: RequestHandler = async ({ locals, params }) => {

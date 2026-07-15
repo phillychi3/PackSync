@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { Check, Plus, Trash2 } from '@lucide/svelte'
 	import { onMount } from 'svelte'
+	import ActionMenu from '$lib/components/action-menu.svelte'
 	import { Button } from '$lib/components/ui/button'
 	import { Input } from '$lib/components/ui/input'
 	import { Textarea } from '$lib/components/ui/textarea'
+	import { confirmDialog } from '$lib/stores/confirm'
+	import { toast } from '$lib/stores/toast'
 	import type { PageData } from './$types'
 	type Critical = {
 		id: string
@@ -24,12 +27,57 @@
 		startTime: string | null
 		transportMode: string | null
 	}
+	type Member = { userId: string; name: string | null; email: string }
 	let { data }: { data: PageData } = $props()
+	const readonly = $derived(data.trip.status === 'completed')
+	const tidy = $derived(data.trip.status === 'ongoing')
 	let items = $state<Critical[]>([])
 	let name = $state('')
 	let description = $state('')
 	let scheduleItems = $state<Schedule[]>([])
+	let members = $state<Member[]>([])
 	let stageFilter = $state('all')
+
+	function memberName(userId: string) {
+		const member = members.find((m) => m.userId === userId)
+		if (!member) return '成員'
+		return member.name || member.email
+	}
+
+	function formatConfirmedAt(value: string | number | Date) {
+		return new Intl.DateTimeFormat('zh-TW', {
+			month: 'numeric',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		}).format(new Date(value))
+	}
+
+	function myConfirmation(item: Critical) {
+		if (!item.scheduleItemId) return null
+		return (
+			item.confirmations.find(
+				(confirmation) =>
+					confirmation.userId === data.user.id &&
+					confirmation.scheduleItemId === item.scheduleItemId
+			) ?? null
+		)
+	}
+
+	async function toggleConfirm(item: Critical) {
+		const mine = myConfirmation(item)
+		const res = await fetch(`/api/trips/${data.trip.id}/critical/${item.id}/confirm`, {
+			method: mine ? 'DELETE' : 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ scheduleItemId: item.scheduleItemId })
+		})
+		if (res.ok) {
+			await load()
+			toast.success(mine ? '已取消確認' : '已確認')
+		} else {
+			toast.error('操作失敗，請稍後再試')
+		}
+	}
 	function itemSchedule(item: Critical) {
 		return scheduleItems.find((schedule) => schedule.id === item.scheduleItemId) ?? null
 	}
@@ -45,12 +93,14 @@
 	})
 
 	async function load() {
-		const [response, scheduleResponse] = await Promise.all([
+		const [response, scheduleResponse, memberResponse] = await Promise.all([
 			fetch(`/api/trips/${data.trip.id}/critical`),
-			fetch(`/api/trips/${data.trip.id}/itinerary`)
+			fetch(`/api/trips/${data.trip.id}/itinerary`),
+			fetch(`/api/trips/${data.trip.id}/members`)
 		])
 		if (response.ok) items = await response.json()
 		if (scheduleResponse.ok) scheduleItems = await scheduleResponse.json()
+		if (memberResponse.ok) members = await memberResponse.json()
 	}
 	async function add(event: SubmitEvent) {
 		event.preventDefault()
@@ -64,12 +114,27 @@
 			items = [...items, { ...(await response.json()), confirmations: [] }]
 			name = ''
 			description = ''
+			toast.success('已新增重要事項')
+		} else {
+			toast.error('新增失敗，請稍後再試')
 		}
 	}
 	async function remove(id: string) {
-		if (!confirm('確定要刪除這個事項嗎？')) return
+		const target = items.find((i) => i.id === id)
+		const ok = await confirmDialog({
+			title: '刪除重要事項',
+			message: `確定要刪除「${target?.name ?? '事項'}」嗎？所有成員的確認紀錄也會刪除。`,
+			confirmLabel: '刪除',
+			danger: true
+		})
+		if (!ok) return
 		const res = await fetch(`/api/trips/${data.trip.id}/critical/${id}`, { method: 'DELETE' })
-		if (res.ok) items = items.filter((i) => i.id !== id)
+		if (res.ok) {
+			items = items.filter((i) => i.id !== id)
+			toast.success('已刪除重要事項')
+		} else {
+			toast.error('刪除失敗，請稍後再試')
+		}
 	}
 	async function saveSchedule(item: Critical, selectedScheduleId: string) {
 		const res = await fetch(`/api/trips/${data.trip.id}/critical/${item.id}`, {
@@ -78,6 +143,7 @@
 			body: JSON.stringify({ scheduleItemId: selectedScheduleId || null })
 		})
 		if (res.ok) await load()
+		else toast.error('更新情境失敗，請稍後再試')
 	}
 	function stageLabel(schedule: Schedule) {
 		if (schedule.transportMode) return `交通 · ${schedule.transportMode}`
@@ -107,13 +173,13 @@
 				{#each [...new Set(items.flatMap((item) => {
 							const schedule = itemSchedule(item)
 							return schedule ? [stageLabel(schedule)] : []
-						}))] as stage}
+						}))] as stage (stage)}
 					<option value={stage}>{stage}</option>
 				{/each}
 			</select>
 		</div>
 		<div class="mt-6 grid gap-3">
-			{#each groupedItems as [group, groupItems]}
+			{#each groupedItems as [group, groupItems] (group)}
 				<div>
 					<h3 class="mb-2 font-mono text-xs font-bold tracking-widest text-black/45">{group}</h3>
 					<div class="grid gap-3">
@@ -131,11 +197,38 @@
 											<p class="mt-1 text-sm leading-6 text-black/55">{item.description}</p>
 										{/if}
 										<p class="mt-3 text-xs text-[#779a00]">選擇情境後，會在對應行程中提醒攜帶</p>
+										{#if item.confirmations.length > 0}
+											<div class="mt-3 border-t border-black/10 pt-2">
+												<p class="mb-1 text-xs font-bold text-black/45">已確認</p>
+												<div class="grid gap-0.5">
+													{#each item.confirmations as confirmation (confirmation.userId + ':' + (confirmation.scheduleItemId ?? ''))}
+														<p class="text-xs text-black/55">
+															{memberName(confirmation.userId)} ·
+															{formatConfirmedAt(confirmation.confirmedAt)}
+														</p>
+													{/each}
+												</div>
+											</div>
+										{/if}
+										{#if item.scheduleItemId && !readonly}
+											<button
+												type="button"
+												class="mt-3 border px-3 py-1.5 text-xs font-bold transition {myConfirmation(
+													item
+												)
+													? 'border-[#779a00] bg-[#d8ff36] text-black'
+													: 'border-black/20 text-black/60 hover:border-black hover:text-black'}"
+												onclick={() => toggleConfirm(item)}
+											>
+												{myConfirmation(item) ? '✓ 我已確認（點擊取消）' : '標記我已確認'}
+											</button>
+										{/if}
 									</div>
 									<div class="flex shrink-0 flex-wrap justify-end gap-2">
 										<select
 											value={item.scheduleItemId ?? ''}
-											class="h-8 max-w-40 border border-black/20 bg-white px-2 text-xs"
+											disabled={readonly}
+											class="h-8 max-w-40 border border-black/20 bg-white px-2 text-xs disabled:opacity-50"
 											onchange={(event) =>
 												saveSchedule(item, (event.currentTarget as HTMLSelectElement).value)}
 										>
@@ -144,14 +237,29 @@
 												<option value={schedule.id}>{schedule.date} · {schedule.title}</option>
 											{/each}
 										</select>
-										<button
-											type="button"
-											title="刪除事項"
-											class="text-black/30 hover:text-red-600"
-											onclick={() => remove(item.id)}
-										>
-											<Trash2 class="size-4" />
-										</button>
+										{#if !readonly}
+											{#if tidy}
+												<ActionMenu
+													actions={[
+														{
+															label: '刪除',
+															icon: Trash2,
+															danger: true,
+															onClick: () => remove(item.id)
+														}
+													]}
+												/>
+											{:else}
+												<button
+													type="button"
+													title="刪除事項"
+													class="text-black/30 hover:text-red-600"
+													onclick={() => remove(item.id)}
+												>
+													<Trash2 class="size-4" />
+												</button>
+											{/if}
+										{/if}
 									</div>
 								</div>
 							</article>
@@ -166,21 +274,27 @@
 			{/if}
 		</div>
 	</section>
-	<form class="grid h-fit gap-4 border border-black/10 bg-white p-5" onsubmit={add}>
-		<h3 class="text-lg font-black">新增重要事項</h3>
-		<Input
-			bind:value={name}
-			placeholder="例如：護照與簽證"
-			required
-			class="rounded-none border-black/20 bg-[#fbfcf8]"
-		/><Textarea
-			bind:value={description}
-			placeholder="補充說明"
-			class="rounded-none border-black/20 bg-[#fbfcf8]"
-		/><Button
-			type="submit"
-			class="h-11 rounded-none bg-[#d8ff36] font-bold text-black hover:bg-[#c8ef28]"
-			><Plus class="size-4" /> 新增事項</Button
-		>
-	</form>
+	{#if readonly}
+		<div class="h-fit border border-black/10 bg-white p-5 text-sm leading-6 text-black/50">
+			這趟旅程已完成，重要事項保留為紀錄，無法再修改。
+		</div>
+	{:else}
+		<form class="grid h-fit gap-4 border border-black/10 bg-white p-5" onsubmit={add}>
+			<h3 class="text-lg font-black">新增重要事項</h3>
+			<Input
+				bind:value={name}
+				placeholder="例如：護照與簽證"
+				required
+				class="rounded-none border-black/20 bg-[#fbfcf8]"
+			/><Textarea
+				bind:value={description}
+				placeholder="補充說明"
+				class="rounded-none border-black/20 bg-[#fbfcf8]"
+			/><Button
+				type="submit"
+				class="h-11 rounded-none bg-[#d8ff36] font-bold text-black hover:bg-[#c8ef28]"
+				><Plus class="size-4" /> 新增事項</Button
+			>
+		</form>
+	{/if}
 </main>

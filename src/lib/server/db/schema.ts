@@ -191,7 +191,7 @@ export const billParticipant = sqliteTable('bill_participant', {
 	userId: text('user_id')
 		.notNull()
 		.references(() => user.id, { onDelete: 'cascade' }),
-	// shares數/百分比/固定金額; equal 時為 null
+	// 百分比/固定金額; equal 時為 null
 	value: real('value')
 })
 
@@ -379,6 +379,53 @@ export const message = sqliteTable(
 	(t) => [index('message_conversation_idx').on(t.conversationId)]
 )
 
+// ─── Notification Read（通知中心已讀狀態） ────────────────────────────────────
+
+export const notificationRead = sqliteTable(
+	'notification_read',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		key: text('key').notNull(),
+		readAt: integer('read_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.notNull()
+	},
+	(t) => [uniqueIndex('notification_read_user_key').on(t.userId, t.key)]
+)
+
+// ─── Agent Action（AI 變更提案：預覽 → 確認 → 寫入 → 復原） ─────────────────
+
+export const agentAction = sqliteTable(
+	'agent_action',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		tripId: text('trip_id')
+			.notNull()
+			.references(() => trip.id, { onDelete: 'cascade' }),
+		conversationId: text('conversation_id')
+			.notNull()
+			.references(() => conversation.id, { onDelete: 'cascade' }),
+		messageId: text('message_id').references(() => message.id, { onDelete: 'set null' }),
+		tool: text('tool').notNull(),
+		args: text('args').notNull(),
+		status: text('status', { enum: ['proposed', 'executed', 'cancelled', 'undone'] })
+			.notNull()
+			.default('proposed'),
+		undoData: text('undo_data'),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.notNull()
+	},
+	(t) => [index('agent_action_conversation_idx').on(t.conversationId)]
+)
+
 // ─── Web Push Subscription ──────────────────────────────────────────────────
 
 export const pushSubscription = sqliteTable(
@@ -398,6 +445,42 @@ export const pushSubscription = sqliteTable(
 			.notNull()
 	},
 	(t) => [index('push_subscription_user_idx').on(t.userId)]
+)
+
+// ─── Notification Preference ─────────────────────────────────────────────────
+
+export const notificationPreference = sqliteTable('notification_preference', {
+	id: text('id')
+		.primaryKey()
+		.$defaultFn(() => crypto.randomUUID()),
+	userId: text('user_id')
+		.notNull()
+		.unique()
+		.references(() => user.id, { onDelete: 'cascade' }),
+	remindItinerary: integer('remind_itinerary', { mode: 'boolean' }).notNull().default(true),
+	remindCritical: integer('remind_critical', { mode: 'boolean' }).notNull().default(true),
+	remindBills: integer('remind_bills', { mode: 'boolean' }).notNull().default(true),
+	remindTodos: integer('remind_todos', { mode: 'boolean' }).notNull().default(true),
+	leadHours: integer('lead_hours').notNull().default(24)
+})
+
+// ─── Notification Log（避免重複推播） ─────────────────────────────────────────
+
+export const notificationLog = sqliteTable(
+	'notification_log',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => crypto.randomUUID()),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		key: text('key').notNull(),
+		sentAt: integer('sent_at', { mode: 'timestamp_ms' })
+			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+			.notNull()
+	},
+	(t) => [uniqueIndex('notification_log_user_key').on(t.userId, t.key)]
 )
 
 // ─── Relations ────────────────────────────────────────────────────────────────

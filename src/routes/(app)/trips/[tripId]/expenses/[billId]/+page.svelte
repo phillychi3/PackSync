@@ -1,7 +1,10 @@
 <script lang="ts">
-	import { ArrowLeft, CircleDollarSign, Pencil, Trash2, Users } from '@lucide/svelte'
+	import { ArrowLeft, Pencil, Trash2 } from '@lucide/svelte'
 	import { onMount } from 'svelte'
 	import { Button } from '$lib/components/ui/button'
+	import UserAvatar from '$lib/components/user-avatar.svelte'
+	import { confirmDialog } from '$lib/stores/confirm'
+	import { toast } from '$lib/stores/toast'
 	import type { PageData } from './$types'
 
 	let { data, params }: { data: PageData; params: { billId: string } } = $props()
@@ -102,9 +105,21 @@
 	}
 
 	async function remove() {
-		if (!confirm('確定要刪除這筆費用嗎？')) return
-		await fetch(`/api/trips/${data.trip.id}/bills/${params.billId}`, { method: 'DELETE' })
-		location.href = `/trips/${data.trip.id}/expenses`
+		const ok = await confirmDialog({
+			title: '刪除費用',
+			message: `確定要刪除「${bill?.title ?? '這筆費用'}」嗎？相關的分帳與結算也會重新計算。`,
+			confirmLabel: '刪除',
+			danger: true
+		})
+		if (!ok) return
+		const res = await fetch(`/api/trips/${data.trip.id}/bills/${params.billId}`, {
+			method: 'DELETE'
+		})
+		if (res.ok) {
+			location.href = `/trips/${data.trip.id}/expenses`
+		} else {
+			toast.error('刪除失敗，請稍後再試')
+		}
 	}
 
 	onMount(load)
@@ -197,11 +212,11 @@
 				<div class="grid gap-2">
 					{#each bill.payers as payer (payer.id)}
 						<div class="flex items-center gap-3">
-							<span
-								class="grid size-8 shrink-0 place-items-center bg-[#eef0eb] font-mono text-xs font-bold text-[#779a00]"
-							>
-								<CircleDollarSign class="size-4" />
-							</span>
+							<UserAvatar
+								name={userName(payer.user)}
+								image={payer.user.image}
+								class="size-8 text-xs"
+							/>
 							<span class="flex-1 text-sm font-bold">{userName(payer.user)}</span>
 							<span class="font-mono text-sm font-bold">
 								{bill.currency}
@@ -225,9 +240,7 @@
 				<div class="grid gap-2">
 					{#each bill.participants as p (p.id)}
 						<div class="flex items-center gap-3">
-							<span class="grid size-8 shrink-0 place-items-center bg-[#eef0eb]">
-								<Users class="size-4 text-black/40" />
-							</span>
+							<UserAvatar name={userName(p.user)} image={p.user.image} class="size-8 text-xs" />
 							<span class="flex-1 text-sm font-bold">{userName(p.user)}</span>
 							{#if bill.splitMethod !== 'equal' && p.value !== null}
 								<span class="font-mono text-xs text-black/40">
@@ -244,23 +257,25 @@
 			</div>
 
 			<!-- Actions -->
-			<div class="border border-black/10 bg-white p-5 sm:p-8">
-				<Button
-					href={`/trips/${data.trip.id}/expenses/new?edit=${bill.id}`}
-					variant="outline"
-					class="mr-2 rounded-none font-bold"
-				>
-					<Pencil class="size-4" /> 編輯費用
-				</Button>
-				<Button
-					type="button"
-					variant="outline"
-					class="rounded-none border-red-200 font-bold text-red-600 hover:bg-red-50"
-					onclick={remove}
-				>
-					<Trash2 class="size-4" /> 刪除費用
-				</Button>
-			</div>
+			{#if data.trip.status !== 'completed'}
+				<div class="border border-black/10 bg-white p-5 sm:p-8">
+					<Button
+						href={`/trips/${data.trip.id}/expenses/new?edit=${bill.id}`}
+						variant="outline"
+						class="mr-2 rounded-none font-bold"
+					>
+						<Pencil class="size-4" /> 編輯費用
+					</Button>
+					<Button
+						type="button"
+						variant="outline"
+						class="rounded-none border-red-200 font-bold text-red-600 hover:bg-red-50"
+						onclick={remove}
+					>
+						<Trash2 class="size-4" /> 刪除費用
+					</Button>
+				</div>
+			{/if}
 		</article>
 	{/if}
 </main>

@@ -1,9 +1,10 @@
 import { json, error } from '@sveltejs/kit'
 import type { RequestHandler } from './$types'
 import { db } from '$lib/server/db'
-import { bill, billPayer, billParticipant, billItem, settlement } from '$lib/server/db/schema'
+import { bill, billPayer, billParticipant, billItem } from '$lib/server/db/schema'
 import { desc, eq } from 'drizzle-orm'
 import { requireAuth, requireMember } from '$lib/server/api'
+import { pushToTripMembers } from '$lib/server/notify'
 
 export const GET: RequestHandler = async ({ locals, params }) => {
 	const user = requireAuth(locals)
@@ -85,6 +86,16 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 
 		return newBill
 	})
+
+	await pushToTripMembers(
+		params.tripId,
+		{
+			title: '新帳單',
+			body: `${user.name || user.email} 新增了「${created.title}」 ${created.amount} ${created.currency}`,
+			url: `/trips/${params.tripId}/expenses`
+		},
+		{ excludeUserId: user.id, respectBillPref: true }
+	)
 
 	return json(created, { status: 201 })
 }

@@ -4,6 +4,7 @@ import { db } from '$lib/server/db'
 import { settlement } from '$lib/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireAuth, requireMember } from '$lib/server/api'
+import { pushToTripMembers } from '$lib/server/notify'
 
 export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	const user = requireAuth(locals)
@@ -26,6 +27,22 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 		})
 		.where(eq(settlement.id, params.settlementId))
 		.returning()
+
+	if (isSettled && !found.isSettled) {
+		await pushToTripMembers(
+			params.tripId,
+			{
+				title: '結算完成',
+				body: `一筆 ${updated.amount.toFixed(2)} 的款項已標記付清`,
+				url: `/trips/${params.tripId}/expenses`
+			},
+			{
+				onlyUserIds: [updated.fromUserId, updated.toUserId],
+				excludeUserId: user.id,
+				respectBillPref: true
+			}
+		)
+	}
 
 	return json(updated)
 }

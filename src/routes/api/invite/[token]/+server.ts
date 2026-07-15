@@ -4,6 +4,7 @@ import { db } from '$lib/server/db'
 import { invitation, tripMember } from '$lib/server/db/schema'
 import { and, eq } from 'drizzle-orm'
 import { requireAuth } from '$lib/server/api'
+import { pushToTripMembers } from '$lib/server/notify'
 
 export const GET: RequestHandler = async ({ locals, params }) => {
 	requireAuth(locals)
@@ -50,6 +51,16 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 			.set({ usedAt: new Date(), usedBy: user.id })
 			.where(eq(invitation.id, inv.id))
 	})
+
+	await pushToTripMembers(
+		inv.tripId,
+		{
+			title: '新成員加入',
+			body: `${user.name || user.email} 加入了旅程`,
+			url: `/trips/${inv.tripId}/members`
+		},
+		{ excludeUserId: user.id }
+	)
 
 	return json({ tripId: inv.tripId }, { status: 201 })
 }

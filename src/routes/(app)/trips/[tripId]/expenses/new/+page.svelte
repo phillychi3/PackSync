@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ArrowLeft, Plus, Trash2 } from '@lucide/svelte'
 	import { Button } from '$lib/components/ui/button'
+	import UserAvatar from '$lib/components/user-avatar.svelte'
 	import { Input } from '$lib/components/ui/input'
 	import { Textarea } from '$lib/components/ui/textarea'
 	import { onMount } from 'svelte'
@@ -354,7 +355,7 @@
 								class="h-9 rounded-none border border-black/20 bg-[#fbfcf8] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[#d8ff36]"
 							>
 								<option value="">不指定</option>
-								{#each CATEGORIES as c}
+								{#each CATEGORIES as c (c)}
 									<option value={c}>{c}</option>
 								{/each}
 							</select>
@@ -488,6 +489,7 @@
 								bind:checked={payerEnabled[m.userId]}
 								class="size-4 accent-[#d8ff36]"
 							/>
+							<UserAvatar name={memberLabel(m)} image={m.image} class="size-6 text-[10px]" />
 							<label for="payer-{m.userId}" class="flex-1 cursor-pointer text-sm font-bold">
 								{memberLabel(m)}
 								{#if m.userId === data.user.id}
@@ -531,7 +533,7 @@
 						04 / 分攤方式
 					</p>
 					<div class="grid grid-cols-3 gap-2">
-						{#each SPLIT_METHODS as m}
+						{#each SPLIT_METHODS as m (m.value)}
 							<label
 								class="cursor-pointer border p-3 text-center text-sm font-bold transition {splitMethod ===
 								m.value
@@ -563,6 +565,7 @@
 									bind:checked={participantEnabled[m.userId]}
 									class="size-4 accent-[#d8ff36]"
 								/>
+								<UserAvatar name={memberLabel(m)} image={m.image} class="size-6 text-[10px]" />
 								<label for="participant-{m.userId}" class="flex-1 cursor-pointer text-sm font-bold">
 									{memberLabel(m)}
 									{#if m.userId === data.user.id}

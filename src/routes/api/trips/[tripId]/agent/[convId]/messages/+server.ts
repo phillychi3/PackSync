@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types'
 import { env } from '$env/dynamic/private'
 import { db } from '$lib/server/db'
 import {
+	agentAction,
 	bill,
 	conversation,
 	message,
@@ -13,8 +14,9 @@ import {
 	tripMember,
 	user
 } from '$lib/server/db/schema'
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, inArray } from 'drizzle-orm'
 import { requireAuth, requireMember } from '$lib/server/api'
+import { describeAction, summarizeAction } from '$lib/server/agent-actions'
 import OpenAI from 'openai'
 
 const agentTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
@@ -22,7 +24,8 @@ const agentTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 		type: 'function',
 		function: {
 			name: 'create_itinerary',
-			description: '在目前旅程新增一個行程。只有使用者明確要求新增、安排或加入行程時才使用。',
+			description:
+				'提出「新增行程」的變更提案。提案需要使用者確認後才會寫入。只有使用者明確要求新增、安排或加入行程時才使用。',
 			parameters: {
 				type: 'object',
 				properties: {
@@ -30,9 +33,49 @@ const agentTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 					title: { type: 'string', description: '行程標題' },
 					startTime: { type: ['string', 'null'], description: '開始時間 HH:mm' },
 					endTime: { type: ['string', 'null'], description: '結束時間 HH:mm' },
-					notes: { type: ['string', 'null'], description: '行程備註' }
+					notes: { type: ['string', 'null'], description: '行程備註' },
+					placeName: {
+						type: ['string', 'null'],
+						description: '要連結的地點名稱（會對應到旅程已儲存的地點）'
+					}
 				},
-				required: ['date', 'title', 'startTime', 'endTime', 'notes'],
+				required: ['date', 'title', 'startTime', 'endTime', 'notes', 'placeName'],
+				additionalProperties: false
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'update_itinerary',
+			description:
+				'提出「修改既有行程」的變更提案。id 請使用行程安排清單中的 id。只填要變更的欄位，其餘傳 null。',
+			parameters: {
+				type: 'object',
+				properties: {
+					id: { type: 'string', description: '要修改的行程 id' },
+					date: { type: ['string', 'null'], description: '新日期 YYYY-MM-DD' },
+					startTime: { type: ['string', 'null'], description: '新開始時間 HH:mm' },
+					endTime: { type: ['string', 'null'], description: '新結束時間 HH:mm' },
+					title: { type: ['string', 'null'], description: '新標題' },
+					notes: { type: ['string', 'null'], description: '新備註' }
+				},
+				required: ['id', 'date', 'startTime', 'endTime', 'title', 'notes'],
+				additionalProperties: false
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'delete_itinerary',
+			description: '提出「刪除既有行程」的變更提案。id 請使用行程安排清單中的 id。',
+			parameters: {
+				type: 'object',
+				properties: {
+					id: { type: 'string', description: '要刪除的行程 id' }
+				},
+				required: ['id'],
 				additionalProperties: false
 			}
 		}
@@ -41,7 +84,7 @@ const agentTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 		type: 'function',
 		function: {
 			name: 'create_todo',
-			description: '在目前旅程新增待辦事項。',
+			description: '提出「新增待辦事項」的變更提案。提案需要使用者確認後才會寫入。',
 			parameters: {
 				type: 'object',
 				properties: {
@@ -57,7 +100,7 @@ const agentTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 		type: 'function',
 		function: {
 			name: 'create_critical_item',
-			description: '在目前旅程新增需要出發前確認的重要物品。',
+			description: '提出「新增出發前需確認的重要物品」的變更提案。提案需要使用者確認後才會寫入。',
 			parameters: {
 				type: 'object',
 				properties: {
@@ -68,67 +111,63 @@ const agentTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 				additionalProperties: false
 			}
 		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'search_place',
+			description:
+				'搜尋真實地點的名稱、地址與座標（OpenStreetMap 資料）。查詢地點資訊或使用者想加入新景點時使用，不需要使用者確認。',
+			parameters: {
+				type: 'object',
+				properties: {
+					query: { type: 'string', description: '地點關鍵字，例如「淺草寺」' }
+				},
+				required: ['query'],
+				additionalProperties: false
+			}
+		}
 	}
 ]
 
-async function executeTool(tripId: string, name: string, rawArguments: string) {
-	let args: Record<string, unknown>
+const PROPOSAL_TOOLS = new Set([
+	'create_itinerary',
+	'update_itinerary',
+	'delete_itinerary',
+	'create_todo',
+	'create_critical_item'
+])
+
+async function searchPlace(query: string) {
 	try {
-		args = JSON.parse(rawArguments) as Record<string, unknown>
+		const upstream = await fetch(
+			`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`,
+			{
+				headers: {
+					'User-Agent': 'PackSync/1.0 travel-planning-app',
+					'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8'
+				}
+			}
+		)
+		if (!upstream.ok) return { success: false, error: '地點搜尋服務暫時無法使用' }
+		const results = (await upstream.json()) as {
+			display_name: string
+			lat: string
+			lon: string
+			name?: string
+		}[]
+		return {
+			success: true,
+			results: results.map((r) => ({
+				name: r.name?.trim() || r.display_name.split(',')[0].trim(),
+				address: r.display_name,
+				lat: parseFloat(r.lat),
+				lng: parseFloat(r.lon)
+			}))
+		}
 	} catch {
-		return { success: false, error: '工具參數不是有效 JSON' }
+		return { success: false, error: '地點搜尋失敗' }
 	}
-
-	if (name === 'create_itinerary') {
-		if (typeof args.date !== 'string' || typeof args.title !== 'string' || !args.title.trim()) {
-			return { success: false, error: '新增行程需要 date 與 title' }
-		}
-		const [created] = await db
-			.insert(scheduleItem)
-			.values({
-				tripId,
-				date: args.date,
-				title: args.title,
-				startTime: typeof args.startTime === 'string' ? args.startTime : null,
-				endTime: typeof args.endTime === 'string' ? args.endTime : null,
-				notes: typeof args.notes === 'string' ? args.notes : null,
-				order: 0
-			})
-			.returning()
-		return { success: true, action: '新增行程', item: created }
-	}
-
-	if (name === 'create_todo') {
-		if (typeof args.title !== 'string' || !args.title.trim()) {
-			return { success: false, error: '新增待辦需要 title' }
-		}
-		const [created] = await db
-			.insert(todo)
-			.values({
-				tripId,
-				title: args.title,
-				dueDate: typeof args.dueDate === 'string' ? args.dueDate : null
-			})
-			.returning()
-		return { success: true, action: '新增待辦', item: created }
-	}
-
-	if (name === 'create_critical_item') {
-		if (typeof args.name !== 'string' || !args.name.trim()) {
-			return { success: false, error: '新增重要物品需要 name' }
-		}
-		const [created] = await db
-			.insert(criticalItem)
-			.values({
-				tripId,
-				name: args.name,
-				description: typeof args.description === 'string' ? args.description : null
-			})
-			.returning()
-		return { success: true, action: '新增重要物品', item: created }
-	}
-
-	return { success: false, error: `不支援的工具：${name}` }
 }
 
 async function buildTripContext(tripId: string) {
@@ -159,10 +198,10 @@ async function buildTripContext(tripId: string) {
 ${members.map((m) => `- ${m.name} (${m.role})`).join('\n')}
 
 ## 景點列表
-${places.length ? places.map((p) => `- ${p.name}${p.address ? ` (${p.address})` : ''}${p.category ? ` [${p.category}]` : ''}`).join('\n') : '尚無景點'}
+${places.length ? places.map((p) => `- ${p.name}${p.address ? ` (${p.address})` : ''}${p.category ? ` [${p.category}]` : ''}${p.openingHours ? ` 營業:${p.openingHours}` : ''}${p.rating !== null ? ` 評價:${p.rating}${p.ratingCount !== null ? `(${p.ratingCount})` : ''}` : ''}`).join('\n') : '尚無景點'}
 
 ## 行程安排
-${schedule.length ? schedule.map((s) => `- ${s.date} ${s.startTime ?? ''} ${s.title}${s.notes ? ` — ${s.notes}` : ''}`).join('\n') : '尚無行程'}
+${schedule.length ? schedule.map((s) => `- [id:${s.id}] ${s.date} ${s.startTime ?? ''} ${s.title}${s.notes ? ` — ${s.notes}` : ''}`).join('\n') : '尚無行程'}
 
 ## 帳單
 ${bills.length ? bills.map((b) => `- ${b.date} ${b.title} ${b.amount} ${b.currency} (${b.splitMethod})`).join('\n') : '尚無帳單'}
@@ -205,11 +244,12 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 		content: m.content
 	}))
 
-	let requestMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+	const requestMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
 		...history,
 		{ role: 'user', content: body.content }
 	]
 	let aiContent = '抱歉，無法生成回應。'
+	const stagedActionIds: string[] = []
 
 	for (let round = 0; round < 4; round += 1) {
 		const completion = await client.chat.completions.create({
@@ -217,7 +257,11 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 			messages: [
 				{
 					role: 'system',
-					content: `你是一個旅行助理，專門幫助旅行團解答問題、規劃行程、查詢費用等。回答請使用繁體中文 Markdown。當使用者明確要求新增行程、待辦或重要物品時，使用對應工具完成操作；不要捏造工具執行結果。以下是本次旅行的相關資料：\n\n${tripContext}`
+					content: `你是一個旅行助理，專門幫助旅行團解答問題、規劃行程、查詢費用等。回答請使用繁體中文 Markdown。
+
+當使用者要求新增、修改或刪除資料時，使用對應工具建立「變更提案」。提案不會立即寫入，使用者會在介面上看到提案卡片並自行按下確認。你的回覆中要簡短說明提案內容，並提醒使用者確認，不要宣稱變更已完成。search_place 工具可即時查詢真實地點，不需要確認。不要捏造工具執行結果。
+
+以下是本次旅行的相關資料：\n\n${tripContext}`
 				},
 				...requestMessages
 			],
@@ -233,11 +277,47 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 		}
 		for (const toolCall of assistant.tool_calls) {
 			if (toolCall.type !== 'function') continue
-			const result = await executeTool(
-				params.tripId,
-				toolCall.function.name,
-				toolCall.function.arguments
-			)
+			let result: unknown
+			if (toolCall.function.name === 'search_place') {
+				let query: string
+				try {
+					query = String(
+						(JSON.parse(toolCall.function.arguments) as Record<string, unknown>).query ?? ''
+					)
+				} catch {
+					query = ''
+				}
+				result = query ? await searchPlace(query) : { success: false, error: '缺少查詢關鍵字' }
+			} else if (PROPOSAL_TOOLS.has(toolCall.function.name)) {
+				let args: Record<string, unknown> | null
+				try {
+					args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>
+				} catch {
+					args = null
+				}
+				if (!args) {
+					result = { success: false, error: '工具參數不是有效 JSON' }
+				} else {
+					const [staged] = await db
+						.insert(agentAction)
+						.values({
+							tripId: params.tripId,
+							conversationId: params.convId,
+							tool: toolCall.function.name,
+							args: JSON.stringify(args)
+						})
+						.returning()
+					stagedActionIds.push(staged.id)
+					result = {
+						success: true,
+						staged: true,
+						summary: summarizeAction(toolCall.function.name, args),
+						note: '已建立變更提案，等待使用者在介面上確認後才會寫入。'
+					}
+				}
+			} else {
+				result = { success: false, error: `不支援的工具：${toolCall.function.name}` }
+			}
 			requestMessages.push({
 				role: 'tool',
 				tool_call_id: toolCall.id,
@@ -251,10 +331,20 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 		.values({ conversationId: params.convId, role: 'assistant', content: aiContent })
 		.returning()
 
+	let proposals: ReturnType<typeof describeAction>[] = []
+	if (stagedActionIds.length > 0) {
+		const staged = await db
+			.update(agentAction)
+			.set({ messageId: assistantMsg.id })
+			.where(inArray(agentAction.id, stagedActionIds))
+			.returning()
+		proposals = staged.map(describeAction)
+	}
+
 	if (conv.messages.length === 0) {
 		const title = body.content.slice(0, 30) + (body.content.length > 30 ? '…' : '')
 		await db.update(conversation).set({ title }).where(eq(conversation.id, params.convId))
 	}
 
-	return json({ userMessage: userMsg, assistantMessage: assistantMsg }, { status: 201 })
+	return json({ userMessage: userMsg, assistantMessage: assistantMsg, proposals }, { status: 201 })
 }

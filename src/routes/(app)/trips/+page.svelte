@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths'
 	import { Button } from '$lib/components/ui/button'
 	import { Card, CardContent } from '$lib/components/ui/card'
-	import { CalendarDays, MapPin, Plane, Plus, Users } from '@lucide/svelte'
+	import { CalendarDays, MapPin, Plane, Plus, Settings, Users } from '@lucide/svelte'
 	import type { PageData } from './$types'
 
 	let { data }: { data: PageData } = $props()
@@ -52,13 +52,23 @@
 					把共同計畫、清單、帳單與提醒，集中在每個旅程裡一起完成。
 				</p>
 			</div>
-			<Button
-				href="/trips/new"
-				class="h-11 justify-center bg-[#d8ff36] px-4 font-bold text-black hover:bg-[#c8ef28]"
-			>
-				<Plus class="size-4" />
-				新增旅程
-			</Button>
+			<div class="flex gap-2">
+				<Button
+					href="/settings"
+					variant="outline"
+					class="h-11 justify-center rounded-none border-black/20 px-4 font-bold hover:border-black"
+				>
+					<Settings class="size-4" />
+					設定
+				</Button>
+				<Button
+					href="/trips/new"
+					class="h-11 justify-center bg-[#d8ff36] px-4 font-bold text-black hover:bg-[#c8ef28]"
+				>
+					<Plus class="size-4" />
+					新增旅程
+				</Button>
+			</div>
 		</header>
 
 		<div class="grid gap-3 sm:grid-cols-3">

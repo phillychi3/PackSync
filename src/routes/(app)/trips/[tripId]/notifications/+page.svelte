@@ -1,38 +1,66 @@
 <script lang="ts">
 	import { Bell, CalendarDays, CircleDollarSign, ListChecks, ShieldAlert } from '@lucide/svelte'
+	import { toast } from '$lib/stores/toast'
 	import { onMount } from 'svelte'
 	import type { PageData } from './$types'
 
 	type Notification = {
-		id: string
+		key: string
 		type: 'itinerary' | 'critical' | 'bills' | 'todos'
 		title: string
 		body: string
 		date?: string
-	}
-	type Schedule = { id: string; title: string; date: string; startTime: string | null }
-	type Todo = { id: string; title: string; dueDate: string | null; isCompleted: boolean }
-	type Critical = {
-		id: string
-		name: string
-		scheduleItemId: string | null
-		confirmations: { userId: string; scheduleItemId: string | null }[]
-	}
-	type Settlement = {
-		id: string
-		amount: number
-		isSettled: boolean
-		fromUserId: string
-		toUserId: string
+		url: string
 	}
 
 	let { data }: { data: PageData } = $props()
 	let notifications = $state<Notification[]>([])
+	let readKeys = $state<string[]>([])
 	let loading = $state(true)
+	const unreadCount = $derived(notifications.filter((item) => !readKeys.includes(item.key)).length)
 	let pushConfigured = $state(false)
 	let pushEnabled = $state(false)
 	let pushBusy = $state(false)
 	let pushMessage = $state('')
+
+	type Prefs = {
+		remindItinerary: boolean
+		remindCritical: boolean
+		remindBills: boolean
+		remindTodos: boolean
+		leadHours: number
+	}
+	let prefs = $state<Prefs>({
+		remindItinerary: true,
+		remindCritical: true,
+		remindBills: true,
+		remindTodos: true,
+		leadHours: 24
+	})
+	let prefsSaving = $state(false)
+
+	const PREF_TOGGLES: { key: keyof Omit<Prefs, 'leadHours'>; label: string }[] = [
+		{ key: 'remindItinerary', label: '行程提醒' },
+		{ key: 'remindCritical', label: '重要物品確認' },
+		{ key: 'remindBills', label: '待付款提醒' },
+		{ key: 'remindTodos', label: '待辦到期提醒' }
+	]
+
+	async function savePrefs() {
+		prefsSaving = true
+		const res = await fetch('/api/me/notification-preferences', {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(prefs)
+		})
+		if (res.ok) {
+			prefs = await res.json()
+			toast.success('通知偏好已儲存')
+		} else {
+			toast.error('儲存通知偏好失敗')
+		}
+		prefsSaving = false
+	}
 
 	const icons = {
 		itinerary: CalendarDays,
@@ -42,74 +70,24 @@
 	}
 
 	async function load() {
-		const [scheduleRes, criticalRes, todoRes, settlementRes] = await Promise.all([
-			fetch(`/api/trips/${data.trip.id}/itinerary`),
-			fetch(`/api/trips/${data.trip.id}/critical`),
-			fetch(`/api/trips/${data.trip.id}/todos`),
-			fetch(`/api/trips/${data.trip.id}/settlements`)
-		])
-		const schedules: Schedule[] = scheduleRes.ok ? await scheduleRes.json() : []
-		const criticals: Critical[] = criticalRes.ok ? await criticalRes.json() : []
-		const todos: Todo[] = todoRes.ok ? await todoRes.json() : []
-		const settlements: Settlement[] = settlementRes.ok ? await settlementRes.json() : []
-		const today = new Date().toISOString().slice(0, 10)
-		const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
-		const upcomingSchedules = schedules.filter(
-			(item) => item.date >= today && item.date <= nextWeek
-		)
-		const criticalNotifications = criticals.flatMap((item) => {
-			const relatedSchedules = item.scheduleItemId
-				? upcomingSchedules.filter((schedule) => schedule.id === item.scheduleItemId)
-				: upcomingSchedules
-			return relatedSchedules
-				.filter(
-					(schedule) =>
-						!item.confirmations.some(
-							(confirmation) =>
-								confirmation.userId === data.user.id && confirmation.scheduleItemId === schedule.id
-						)
-				)
-				.map((schedule) => ({
-					id: `critical:${item.id}:${schedule.id}`,
-					type: 'critical' as const,
-					title: `出發前確認：${item.name}`,
-					body: `${schedule.date}${schedule.startTime ? ` ${schedule.startTime}` : ''} 開始前請確認。`,
-					date: schedule.date
-				}))
-		})
-		notifications = [
-			...schedules
-				.filter((item) => item.date >= today && item.date <= nextWeek)
-				.map((item) => ({
-					id: `schedule:${item.id}`,
-					type: 'itinerary' as const,
-					title: item.title,
-					body: `${item.date}${item.startTime ? ` ${item.startTime}` : ''} 的行程即將到來。`,
-					date: item.date
-				})),
-			...criticalNotifications,
-			...settlements
-				.filter((item) => !item.isSettled)
-				.map((item) => ({
-					id: `bill:${item.id}`,
-					type: 'bills' as const,
-					title: '有待處理的轉帳',
-					body: `尚有 ${item.amount.toFixed(2)} 的款項未付清。`
-				})),
-			...todos
-				.filter((item) => !item.isCompleted && item.dueDate && item.dueDate <= nextWeek)
-				.map((item) => ({
-					id: `todo:${item.id}`,
-					type: 'todos' as const,
-					title: item.title,
-					body:
-						item.dueDate && item.dueDate < today
-							? '已逾期，請盡快處理。'
-							: `截止日：${item.dueDate}`,
-					date: item.dueDate ?? undefined
-				}))
-		]
+		const response = await fetch(`/api/trips/${data.trip.id}/notifications`)
+		if (response.ok) {
+			const payload = await response.json()
+			notifications = payload.items
+			readKeys = payload.readKeys
+		}
 		loading = false
+	}
+
+	async function markRead(keys: string[]) {
+		const unread = keys.filter((key) => !readKeys.includes(key))
+		if (unread.length === 0) return
+		readKeys = [...readKeys, ...unread]
+		await fetch(`/api/trips/${data.trip.id}/notifications`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ keys: unread })
+		})
 	}
 
 	function decodeBase64(value: string) {
@@ -162,6 +140,9 @@
 		}
 	}
 	onMount(() => {
+		fetch('/api/me/notification-preferences').then(async (response) => {
+			if (response.ok) prefs = await response.json()
+		})
 		fetch('/api/push/vapid-public-key').then(async (response) => {
 			pushConfigured = response.ok
 			if (response.ok && 'serviceWorker' in navigator) {
@@ -178,10 +159,23 @@
 <svelte:head><title>通知中心 | {data.trip.name}</title></svelte:head>
 
 <main class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:py-12">
-	<div class="border-b border-black/15 pb-6">
-		<p class="font-mono text-xs font-bold tracking-widest text-black/45">NOTIFICATIONS</p>
-		<h1 class="mt-3 text-4xl font-black">通知中心</h1>
-		<p class="mt-3 text-black/55">集中查看行程、重要物品、帳單與待辦提醒。</p>
+	<div
+		class="flex flex-col gap-4 border-b border-black/15 pb-6 sm:flex-row sm:items-end sm:justify-between"
+	>
+		<div>
+			<p class="font-mono text-xs font-bold tracking-widest text-black/45">NOTIFICATIONS</p>
+			<h1 class="mt-3 text-4xl font-black">通知中心</h1>
+			<p class="mt-3 text-black/55">集中查看行程、重要物品、帳單與待辦提醒。</p>
+		</div>
+		{#if unreadCount > 0}
+			<button
+				type="button"
+				class="h-10 shrink-0 border border-black/20 px-4 text-sm font-bold hover:border-black"
+				onclick={() => markRead(notifications.map((item) => item.key))}
+			>
+				全部標為已讀（{unreadCount}）
+			</button>
+		{/if}
 	</div>
 	<div class="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
 		<section class="grid gap-3">
@@ -192,18 +186,34 @@
 				>
 					<Bell class="mx-auto mb-3 size-8" />目前沒有需要處理的通知。
 				</div>{:else}
-				{#each notifications as item (item.id)}
+				{#each notifications as item (item.key)}
 					{@const Icon = icons[item.type]}
-					<article class="flex gap-4 border border-black/10 bg-white p-5">
-						<div class="grid size-10 shrink-0 place-items-center bg-[#d8ff36]">
+					{@const unread = !readKeys.includes(item.key)}
+					<!-- eslint-disable svelte/no-navigation-without-resolve -->
+					<a
+						href={item.url}
+						class="flex gap-4 border p-5 transition {unread
+							? 'border-black/30 bg-white hover:border-black'
+							: 'border-black/10 bg-white opacity-60 hover:opacity-100'}"
+						onclick={() => markRead([item.key])}
+					>
+						<div
+							class="grid size-10 shrink-0 place-items-center {unread
+								? 'bg-[#d8ff36]'
+								: 'bg-[#eef0eb]'}"
+						>
 							<Icon class="size-5" />
 						</div>
-						<div class="min-w-0">
-							<h2 class="font-bold">{item.title}</h2>
+						<div class="min-w-0 flex-1">
+							<h2 class="flex items-center gap-2 font-bold">
+								{item.title}
+								{#if unread}<span class="size-2 shrink-0 rounded-full bg-[#779a00]"></span>{/if}
+							</h2>
 							<p class="mt-1 text-sm leading-6 text-black/55">{item.body}</p>
 							{#if item.date}<p class="mt-2 font-mono text-xs text-black/40">{item.date}</p>{/if}
 						</div>
-					</article>
+					</a>
+					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				{/each}
 			{/if}
 		</section>
@@ -225,6 +235,41 @@
 							? '啟用 Web Push'
 							: '尚未設定 VAPID'}</button
 			>
+			{#if pushMessage}<p class="mt-2 text-xs text-red-600">{pushMessage}</p>{/if}
+
+			<div class="mt-6 border-t border-black/10 pt-5">
+				<h3 class="font-black">通知偏好</h3>
+				<div class="mt-3 grid gap-2.5">
+					{#each PREF_TOGGLES as t (t.key)}
+						<label class="flex cursor-pointer items-center justify-between gap-3 text-sm font-bold">
+							{t.label}
+							<input type="checkbox" bind:checked={prefs[t.key]} class="size-4 accent-[#d8ff36]" />
+						</label>
+					{/each}
+					<label class="mt-1 grid gap-1.5 text-sm font-bold">
+						提前提醒時間
+						<select
+							bind:value={prefs.leadHours}
+							class="h-9 border border-black/20 bg-[#fbfcf8] px-2 text-sm"
+						>
+							<option value={3}>3 小時前</option>
+							<option value={6}>6 小時前</option>
+							<option value={12}>12 小時前</option>
+							<option value={24}>1 天前</option>
+							<option value={48}>2 天前</option>
+							<option value={72}>3 天前</option>
+						</select>
+					</label>
+				</div>
+				<button
+					type="button"
+					class="mt-4 h-10 w-full bg-[#d8ff36] px-3 text-sm font-bold hover:bg-[#c8ef28] disabled:opacity-40"
+					disabled={prefsSaving}
+					onclick={savePrefs}
+				>
+					{prefsSaving ? '儲存中…' : '儲存偏好'}
+				</button>
+			</div>
 		</aside>
 	</div>
 </main>
