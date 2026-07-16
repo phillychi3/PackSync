@@ -85,7 +85,10 @@ function decodeFlexiblePolyline(encoded: string): [number, number][] | null {
 
 // ─── MaaS 路徑規劃 ───────────────────────────────────────────────────────────
 
-type TdxPlace = { place?: { location?: { lat?: number; lng?: number } } }
+type TdxPlace = {
+	time?: string
+	place?: { name?: string; location?: { lat?: number; lng?: number } }
+}
 type TdxSection = {
 	type?: string
 	polyline?: string
@@ -95,7 +98,24 @@ type TdxSection = {
 }
 type TdxRoute = { sections?: TdxSection[] }
 
-export type TransitLeg = { mode: string; coords: [number, number][] }
+export type TransitLeg = {
+	mode: string
+	name?: string
+	fromName?: string
+	toName?: string
+	departureTime?: string
+	arrivalTime?: string
+	coords: [number, number][]
+}
+
+export type TransitRoute = {
+	legs: TransitLeg[]
+	durationMinutes: number | null
+	departureTime: string | null
+	arrivalTime: string | null
+	transfers: number | null
+	services: string[]
+}
 
 function sectionCoords(section: TdxSection): [number, number][] | null {
 	if (section.polyline) {
@@ -116,9 +136,9 @@ function sectionCoords(section: TdxSection): [number, number][] | null {
 export async function tdxTransitRoute(
 	from: [number, number],
 	to: [number, number]
-): Promise<TransitLeg[]> {
+): Promise<TransitRoute | null> {
 	const token = await getTdxToken()
-	if (!token) return []
+	if (!token) return null
 	try {
 		const res = await fetch(
 			`https://tdx.transportdata.tw/api/maas/routing?origin=${from[0]},${from[1]}&destination=${to[0]},${to[1]}&gc=1.0&top=1&transit=3,4,5,6,7,8,9`,
@@ -127,10 +147,10 @@ export async function tdxTransitRoute(
 				signal: AbortSignal.timeout(10000)
 			}
 		)
-		if (!res.ok) return []
+		if (!res.ok) return null
 		const body = (await res.json()) as { data?: { routes?: TdxRoute[] } }
 		const sections = body.data?.routes?.[0]?.sections
-		if (!Array.isArray(sections) || sections.length === 0) return []
+		if (!Array.isArray(sections) || sections.length === 0) return null
 
 		const legs: TransitLeg[] = []
 		for (const section of sections) {
@@ -138,11 +158,35 @@ export async function tdxTransitRoute(
 			if (!coords) continue
 			legs.push({
 				mode: section.type === 'pedestrian' ? 'WALK' : (section.transport?.mode ?? 'TRANSIT'),
+				name: section.transport?.name,
+				fromName: section.departure?.place?.name,
+				toName: section.arrival?.place?.name,
+				departureTime: section.departure?.time,
+				arrivalTime: section.arrival?.time,
 				coords
 			})
 		}
-		return legs
+		if (legs.length === 0) return null
+		const departureTime = legs.find((leg) => leg.departureTime)?.departureTime ?? null
+		const arrivalTime = legs.findLast((leg) => leg.arrivalTime)?.arrivalTime ?? null
+		const durationMs =
+			departureTime && arrivalTime ? Date.parse(arrivalTime) - Date.parse(departureTime) : NaN
+		const transitLegs = legs.filter((leg) => leg.mode !== 'WALK')
+		return {
+			legs,
+			durationMinutes: Number.isFinite(durationMs)
+				? Math.max(1, Math.round(durationMs / 60000))
+				: null,
+			departureTime,
+			arrivalTime,
+			transfers: transitLegs.length > 0 ? Math.max(0, transitLegs.length - 1) : null,
+			services: [
+				...new Set(
+					transitLegs.map((leg) => leg.name).filter((name): name is string => Boolean(name))
+				)
+			]
+		}
 	} catch {
-		return []
+		return null
 	}
 }

@@ -299,6 +299,8 @@
 			segments.push({
 				from: [withCoords[i].place!.lat!, withCoords[i].place!.lng!],
 				to: [withCoords[i + 1].place!.lat!, withCoords[i + 1].place!.lng!],
+				fromTitle: withCoords[i].title,
+				toTitle: withCoords[i + 1].title,
 				mode: withCoords[i + 1].transportMode
 			})
 		}
@@ -313,11 +315,104 @@
 
 	// Real route geometry: OSRM (FOSSGIS) for walk/drive, Transitous (MOTIS) for transit;
 	// falls back to a dashed straight line for flight/boat, uncovered regions, or on failure
-	type RouteSegment = { from: [number, number]; to: [number, number]; mode: string | null }
-	type TransitLeg = { mode: string; coords: [number, number][] }
-	const routeCache: Record<string, [number, number][]> = {}
-	const transitCache: Record<string, TransitLeg[]> = {}
+	type RouteSegment = {
+		from: [number, number]
+		to: [number, number]
+		fromTitle: string
+		toTitle: string
+		mode: string | null
+	}
+	type TransitLeg = {
+		mode: string
+		name?: string
+		fromName?: string
+		toName?: string
+		departureTime?: string | null
+		arrivalTime?: string | null
+		coords: [number, number][]
+	}
+	type TransitRoute = {
+		legs: TransitLeg[]
+		source: string | null
+		durationMinutes: number | null
+		departureTime: string | null
+		arrivalTime: string | null
+		transfers: number | null
+		services: string[]
+	}
+	type RoadRoute = {
+		coords: [number, number][]
+		durationMinutes: number
+		distanceKm: number
+	}
+	type SegmentOptions = {
+		loading: boolean
+		loaded: boolean
+		walk: RoadRoute | null
+		drive: RoadRoute | null
+		transit: TransitRoute | null
+		error: string | null
+	}
+	const ROAD_CACHE_MS = 7 * 24 * 60 * 60 * 1000
+	const TRANSIT_CACHE_MS = 5 * 60 * 1000
+	const EMPTY_CACHE_MS = 60 * 1000
+	const CACHE_PREFIX = 'packsync:route:v2:'
+	const MAX_STORED_ROUTES = 40
+	const routeCache: Record<string, RoadRoute> = {}
+	const routeMissCache: Record<string, number> = {}
+	const transitCache: Record<string, { value: TransitRoute; expiresAt: number }> = {}
+	let segmentOptions = $state<Record<string, SegmentOptions>>({})
 	let routeGeneration = 0
+
+	function coordinateKey(from: [number, number], to: [number, number]) {
+		return [...from, ...to].map((value) => value.toFixed(5)).join(':')
+	}
+
+	function readStoredRoute<T>(key: string): T | undefined {
+		if (typeof localStorage === 'undefined') return undefined
+		try {
+			const raw = localStorage.getItem(`${CACHE_PREFIX}${key}`)
+			if (!raw) return undefined
+			const cached = JSON.parse(raw) as { value: T; expiresAt: number }
+			if (cached.expiresAt <= Date.now()) {
+				localStorage.removeItem(`${CACHE_PREFIX}${key}`)
+				return undefined
+			}
+			return cached.value
+		} catch {
+			return undefined
+		}
+	}
+
+	function storeRoute<T>(key: string, value: T, ttl: number) {
+		if (typeof localStorage === 'undefined') return
+		try {
+			const stored: { key: string; expiresAt: number }[] = []
+			for (let index = localStorage.length - 1; index >= 0; index--) {
+				const storedKey = localStorage.key(index)
+				if (!storedKey?.startsWith(CACHE_PREFIX)) continue
+				try {
+					const entry = JSON.parse(localStorage.getItem(storedKey) ?? '') as { expiresAt: number }
+					if (entry.expiresAt <= Date.now()) localStorage.removeItem(storedKey)
+					else stored.push({ key: storedKey, expiresAt: entry.expiresAt })
+				} catch {
+					localStorage.removeItem(storedKey)
+				}
+			}
+			if (stored.length >= MAX_STORED_ROUTES) {
+				stored
+					.sort((a, b) => a.expiresAt - b.expiresAt)
+					.slice(0, stored.length - MAX_STORED_ROUTES + 1)
+					.forEach((entry) => localStorage.removeItem(entry.key))
+			}
+			localStorage.setItem(
+				`${CACHE_PREFIX}${key}`,
+				JSON.stringify({ value, expiresAt: Date.now() + ttl })
+			)
+		} catch {
+			// Storage may be full or disabled; the in-memory cache still works.
+		}
+	}
 
 	function routeProfile(mode: string | null): 'car' | 'foot' | null {
 		if (mode === 'walk') return 'foot'
@@ -328,19 +423,47 @@
 	async function fetchTransitRoute(
 		from: [number, number],
 		to: [number, number]
-	): Promise<TransitLeg[]> {
-		const key = `${from[0]},${from[1]};${to[0]},${to[1]}`
-		if (transitCache[key]) return transitCache[key]
+	): Promise<TransitRoute> {
+		const key = `transit:${coordinateKey(from, to)}`
+		const memory = transitCache[key]
+		if (memory?.expiresAt && memory.expiresAt > Date.now()) return memory.value
+		const stored = readStoredRoute<TransitRoute>(key)
+		if (stored) {
+			transitCache[key] = { value: stored, expiresAt: Date.now() + TRANSIT_CACHE_MS }
+			return stored
+		}
 		try {
 			const res = await fetch(
 				`/api/trips/${data.trip.id}/transit-route?fromLat=${from[0]}&fromLng=${from[1]}&toLat=${to[0]}&toLng=${to[1]}`
 			)
-			if (!res.ok) return []
-			const body = (await res.json()) as { legs: TransitLeg[] }
-			transitCache[key] = body.legs
-			return body.legs
+			if (!res.ok) throw new Error('Transit route request failed')
+			const body = (await res.json()) as TransitRoute
+			const route = {
+				legs: body.legs ?? [],
+				source: body.source ?? null,
+				durationMinutes: body.durationMinutes ?? null,
+				departureTime: body.departureTime ?? null,
+				arrivalTime: body.arrivalTime ?? null,
+				transfers: body.transfers ?? null,
+				services: body.services ?? []
+			}
+			const ttl = route.legs.length > 0 ? TRANSIT_CACHE_MS : EMPTY_CACHE_MS
+			transitCache[key] = { value: route, expiresAt: Date.now() + ttl }
+			storeRoute(key, route, ttl)
+			return route
 		} catch {
-			return []
+			const route = {
+				legs: [],
+				source: null,
+				durationMinutes: null,
+				departureTime: null,
+				arrivalTime: null,
+				transfers: null,
+				services: []
+			}
+			transitCache[key] = { value: route, expiresAt: Date.now() + EMPTY_CACHE_MS }
+			storeRoute(key, route, EMPTY_CACHE_MS)
+			return route
 		}
 	}
 
@@ -348,23 +471,49 @@
 		from: [number, number],
 		to: [number, number],
 		profile: 'car' | 'foot'
-	): Promise<[number, number][] | null> {
+	): Promise<RoadRoute | null> {
 		// Long segments (flights, ferries) don't have road routes
 		if (Math.abs(from[0] - to[0]) + Math.abs(from[1] - to[1]) > 3) return null
-		const key = `${profile}:${from[0]},${from[1]};${to[0]},${to[1]}`
+		const key = `${profile}:${coordinateKey(from, to)}`
 		if (routeCache[key]) return routeCache[key]
+		if ((routeMissCache[key] ?? 0) > Date.now()) return null
+		const stored = readStoredRoute<RoadRoute | null>(key)
+		if (stored === null) {
+			routeMissCache[key] = Date.now() + EMPTY_CACHE_MS
+			return null
+		}
+		if (stored) {
+			routeCache[key] = stored
+			return stored
+		}
 		try {
 			const res = await fetch(
 				`https://routing.openstreetmap.de/routed-${profile}/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`
 			)
-			if (!res.ok) return null
+			if (!res.ok) {
+				routeMissCache[key] = Date.now() + EMPTY_CACHE_MS
+				storeRoute(key, null, EMPTY_CACHE_MS)
+				return null
+			}
 			const body = await res.json()
-			const coords: [number, number][] | undefined = body.routes?.[0]?.geometry?.coordinates
-			if (!coords || coords.length < 2) return null
-			const latLngs = coords.map(([lng, lat]) => [lat, lng] as [number, number])
-			routeCache[key] = latLngs
-			return latLngs
+			const result = body.routes?.[0]
+			const coords: [number, number][] | undefined = result?.geometry?.coordinates
+			if (!coords || coords.length < 2) {
+				routeMissCache[key] = Date.now() + EMPTY_CACHE_MS
+				storeRoute(key, null, EMPTY_CACHE_MS)
+				return null
+			}
+			const route = {
+				coords: coords.map(([lng, lat]) => [lat, lng] as [number, number]),
+				durationMinutes: Math.max(1, Math.round(Number(result.duration) / 60)),
+				distanceKm: Math.round((Number(result.distance) / 1000) * 10) / 10
+			}
+			routeCache[key] = route
+			storeRoute(key, route, ROAD_CACHE_MS)
+			return route
 		} catch {
+			routeMissCache[key] = Date.now() + EMPTY_CACHE_MS
+			storeRoute(key, null, EMPTY_CACHE_MS)
 			return null
 		}
 	}
@@ -374,15 +523,19 @@
 		if (!L || !leafMap || segments.length === 0) return
 		for (const segment of segments) {
 			if (segment.mode === 'transit') {
-				const legs = await fetchTransitRoute(segment.from, segment.to)
+				const transit = await fetchTransitRoute(segment.from, segment.to)
 				if (generation !== routeGeneration || !L || !leafMap) return
-				if (legs.length > 0) {
-					for (const leg of legs) {
+				if (transit.legs.length > 0) {
+					for (const leg of transit.legs) {
 						const style =
 							leg.mode === 'WALK'
-								? { color: '#779a00', weight: 3, opacity: 0.85, dashArray: '1 7' }
-								: { color: '#4a6b00', weight: 4, opacity: 0.85 }
-						mapRoutes.push(L.polyline(leg.coords, style).addTo(leafMap))
+								? { color: '#ea580c', weight: 3, opacity: 0.9, dashArray: '2 7' }
+								: { color: '#7c3aed', weight: 5, opacity: 0.88 }
+						const detail = leg.name ? ` · ${leg.name}` : ''
+						const line = L.polyline(leg.coords, style)
+							.bindPopup(`<b>${segment.fromTitle} → ${segment.toTitle}</b><br>大眾運輸${detail}`)
+							.addTo(leafMap)
+						mapRoutes.push(line)
 					}
 					continue
 				}
@@ -392,12 +545,83 @@
 			if (generation !== routeGeneration || !L || !leafMap) return
 			const style = geometry
 				? profile === 'foot'
-					? { color: '#779a00', weight: 3, opacity: 0.85, dashArray: '1 7' }
-					: { color: '#779a00', weight: 4, opacity: 0.8 }
-				: { color: '#779a00', weight: 4, opacity: 0.75, dashArray: '8 8' }
-			const line = L.polyline(geometry ?? [segment.from, segment.to], style).addTo(leafMap)
+					? { color: '#ea580c', weight: 3, opacity: 0.9, dashArray: '2 7' }
+					: { color: '#2563eb', weight: 5, opacity: 0.85 }
+				: segment.mode === 'flight'
+					? { color: '#0891b2', weight: 4, opacity: 0.8, dashArray: '12 8' }
+					: segment.mode === 'boat'
+						? { color: '#0f766e', weight: 4, opacity: 0.8, dashArray: '12 8' }
+						: { color: '#6b7280', weight: 4, opacity: 0.75, dashArray: '8 8' }
+			const label = geometry
+				? profile === 'foot'
+					? '步行'
+					: '開車'
+				: segment.mode === 'flight'
+					? '航班（示意直線）'
+					: segment.mode === 'boat'
+						? '船（示意直線）'
+						: '無法取得路線（示意直線）'
+			const line = L.polyline(geometry?.coords ?? [segment.from, segment.to], style)
+				.bindPopup(`<b>${segment.fromTitle} → ${segment.toTitle}</b><br>${label}`)
+				.addTo(leafMap)
 			mapRoutes.push(line)
 		}
+	}
+
+	function itemCoords(item: Item): [number, number] | null {
+		return item.place?.lat != null && item.place.lng != null
+			? [item.place.lat, item.place.lng]
+			: null
+	}
+
+	function segmentKey(from: Item, to: Item) {
+		return `${from.id}:${to.id}`
+	}
+
+	async function loadSegmentOptions(fromItem: Item, toItem: Item) {
+		const key = segmentKey(fromItem, toItem)
+		const from = itemCoords(fromItem)
+		const to = itemCoords(toItem)
+		if (!from || !to) {
+			segmentOptions[key] = {
+				loading: false,
+				loaded: true,
+				walk: null,
+				drive: null,
+				transit: null,
+				error: '起點或終點缺少座標，無法查詢交通方案。'
+			}
+			return
+		}
+		segmentOptions[key] = {
+			loading: true,
+			loaded: false,
+			walk: null,
+			drive: null,
+			transit: null,
+			error: null
+		}
+		const [walk, drive, transit] = await Promise.all([
+			fetchRoute(from, to, 'foot'),
+			fetchRoute(from, to, 'car'),
+			fetchTransitRoute(from, to)
+		])
+		segmentOptions[key] = {
+			loading: false,
+			loaded: true,
+			walk,
+			drive,
+			transit: transit.legs.length > 0 ? transit : null,
+			error: !walk && !drive && transit.legs.length === 0 ? '目前查不到可用的交通方案。' : null
+		}
+	}
+
+	function formatClock(value: string | null) {
+		if (!value) return ''
+		const date = new Date(value)
+		return Number.isNaN(date.getTime())
+			? ''
+			: new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit' }).format(date)
 	}
 
 	function focusItemOnMap(item: Item) {
@@ -699,13 +923,35 @@
 	{/if}
 
 	<!-- Map -->
-	<div bind:this={mapEl} class="relative mt-3 h-64 w-full border border-black/10 sm:h-80">
+	<div class="relative mt-3 h-64 w-full border border-black/10 sm:h-80">
+		<div bind:this={mapEl} class="absolute inset-0"></div>
 		{#if !mapInitialized}
-			<div class="absolute inset-0 grid place-items-center bg-[#eef0eb]">
+			<div class="absolute inset-0 z-[600] grid place-items-center bg-[#eef0eb]">
 				<span class="font-mono text-xs text-black/40">地圖載入中…</span>
 			</div>
 		{/if}
+		<div
+			class="absolute bottom-3 left-3 z-[500] grid grid-cols-2 gap-x-3 gap-y-1 border border-black/15 bg-white/95 px-3 py-2 text-[10px] shadow-sm backdrop-blur"
+			aria-label="地圖路線圖例"
+		>
+			<span class="flex items-center gap-1.5"
+				><i class="w-5 border-t-2 border-dotted border-orange-600"></i>步行</span
+			>
+			<span class="flex items-center gap-1.5"
+				><i class="w-5 border-t-2 border-blue-600"></i>開車</span
+			>
+			<span class="flex items-center gap-1.5"
+				><i class="w-5 border-t-2 border-violet-600"></i>大眾運輸</span
+			>
+			<span class="flex items-center gap-1.5"
+				><i class="w-5 border-t-2 border-dashed border-cyan-700"></i>航班／船</span
+			>
+			<span class="col-span-2 flex items-center gap-1.5 text-black/50"
+				><i class="w-5 border-t-2 border-dashed border-gray-500"></i>無路線資料</span
+			>
+		</div>
 	</div>
+	<p class="mt-1.5 text-xs text-black/45">點擊地圖上的路線可查看該路段的處理方式。</p>
 
 	<!-- Items + Form -->
 	<div class="mt-8 grid gap-8 lg:grid-cols-[1fr_380px]">
@@ -870,7 +1116,97 @@
 								</div>
 							</div>
 							<div class="relative grid gap-3 border-l-2 border-[#d8ff36] pl-4">
-								{#each day.items as item (item.id)}
+								{#each day.items as item, itemIndex (item.id)}
+									{#if itemIndex > 0}
+										{@const previousItem = day.items[itemIndex - 1]}
+										{@const optionState = segmentOptions[segmentKey(previousItem, item)]}
+										<section
+											class="border border-black/10 bg-[#f7f8f4] p-3"
+											aria-label={`${previousItem.title} 到 ${item.title} 的交通方案`}
+										>
+											<div class="flex flex-wrap items-center justify-between gap-2">
+												<div class="min-w-0">
+													<p class="truncate text-xs font-bold">
+														{previousItem.title} → {item.title}
+													</p>
+													<p class="mt-0.5 text-[10px] text-black/45">
+														到這裡的方式：{TRANSPORT_LABELS[item.transportMode ?? ''] ??
+															'未指定（預設開車）'}
+													</p>
+												</div>
+												<button
+													type="button"
+													disabled={optionState?.loading}
+													class="shrink-0 border border-black/20 bg-white px-2.5 py-1.5 font-mono text-[10px] font-bold hover:border-black disabled:opacity-50"
+													onclick={() => loadSegmentOptions(previousItem, item)}
+												>
+													{optionState?.loading
+														? '查詢中…'
+														: optionState?.loaded
+															? '重新查詢'
+															: '查詢交通方案'}
+												</button>
+											</div>
+											{#if optionState?.loaded}
+												{#if optionState.error}
+													<p class="mt-2 text-xs text-red-700">{optionState.error}</p>
+												{:else}
+													<div class="mt-2 grid gap-2 sm:grid-cols-3">
+														<div class="border-l-4 border-orange-600 bg-white px-2.5 py-2">
+															<p class="text-xs font-bold">步行</p>
+															<p class="mt-0.5 text-[10px] text-black/50">
+																{optionState.walk
+																	? `${optionState.walk.durationMinutes} 分 · ${optionState.walk.distanceKm} km`
+																	: '查無路線'}
+															</p>
+														</div>
+														<div class="border-l-4 border-blue-600 bg-white px-2.5 py-2">
+															<p class="text-xs font-bold">開車</p>
+															<p class="mt-0.5 text-[10px] text-black/50">
+																{optionState.drive
+																	? `${optionState.drive.durationMinutes} 分 · ${optionState.drive.distanceKm} km`
+																	: '查無路線'}
+															</p>
+														</div>
+														<div class="border-l-4 border-violet-600 bg-white px-2.5 py-2">
+															<p class="text-xs font-bold">大眾運輸</p>
+															{#if optionState.transit}
+																<p class="mt-0.5 text-[10px] text-black/50">
+																	{optionState.transit.durationMinutes
+																		? `${optionState.transit.durationMinutes} 分`
+																		: '有可用路線'}{optionState.transit.transfers != null
+																		? ` · 轉乘 ${optionState.transit.transfers} 次`
+																		: ''}
+																</p>
+																{#if optionState.transit.departureTime || optionState.transit.arrivalTime}
+																	<p class="mt-0.5 text-[10px] text-black/50">
+																		{formatClock(optionState.transit.departureTime)}–{formatClock(
+																			optionState.transit.arrivalTime
+																		)}
+																	</p>
+																{/if}
+																{#if optionState.transit.services.length > 0}
+																	<p
+																		class="mt-0.5 break-words text-[10px] leading-4 font-bold text-violet-700"
+																	>
+																		搭乘：{optionState.transit.services.join(' → ')}
+																	</p>
+																{/if}
+																<p class="mt-1 text-[9px] text-black/35">
+																	來源：{optionState.transit.source}
+																</p>
+															{:else}
+																<p class="mt-0.5 text-[10px] text-black/50">查無路線</p>
+															{/if}
+														</div>
+													</div>
+													<p class="mt-2 text-[10px] text-black/40">
+														步行與開車為一般路網估時；大眾運輸班次與即時性依資料來源涵蓋範圍為準。
+													</p>
+												{/if}
+											{/if}
+										</section>
+									{/if}
 									{#if editingId === item.id}
 										<article class="grid gap-3 border border-black bg-white p-4">
 											<div class="grid grid-cols-3 gap-3">
@@ -904,7 +1240,7 @@
 												/></label
 											>
 											<label class="grid gap-1.5 text-xs font-bold"
-												>前往方式<select
+												>到這裡的方式<select
 													bind:value={editForm.transportMode}
 													class="h-10 border border-black/20 bg-[#fbfcf8] px-3 text-sm"
 												>
@@ -1207,7 +1543,7 @@
 					/></label
 				>
 				<label class="grid gap-2 text-sm font-bold"
-					>前往方式<select
+					>到這裡的方式<select
 						bind:value={form.transportMode}
 						class="h-10 border border-black/20 bg-[#fbfcf8] px-3 text-sm"
 					>
