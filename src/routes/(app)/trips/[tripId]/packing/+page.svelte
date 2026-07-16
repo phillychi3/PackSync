@@ -70,21 +70,32 @@
 	async function addItem(event: SubmitEvent) {
 		event.preventDefault()
 		if (!itemName.trim() || !selectedList) return
-		const response = await fetch(`/api/trips/${data.trip.id}/packing/${selectedList}/items`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({
-				name: itemName,
-				quantity: Math.max(1, Number(itemQuantity) || 1)
-			})
-		})
-		if (response.ok) {
-			const item = await response.json()
-			if (selectedListData) selectedListData.items = [...selectedListData.items, item]
+		// 支援「護照, 充電器、常備藥」一次輸入多個物品
+		const names = itemName
+			.split(/[,，、\n]/)
+			.map((name) => name.trim())
+			.filter(Boolean)
+		if (names.length === 0) return
+		const quantity = Math.max(1, Number(itemQuantity) || 1)
+		const results = await Promise.all(
+			names.map((name) =>
+				fetch(`/api/trips/${data.trip.id}/packing/${selectedList}/items`, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ name, quantity })
+				}).then(async (response) => (response.ok ? await response.json() : null))
+			)
+		)
+		const created = results.filter((item) => item !== null)
+		if (selectedListData && created.length > 0) {
+			selectedListData.items = [...selectedListData.items, ...created]
+		}
+		if (created.length === names.length) {
 			itemName = ''
 			itemQuantity = '1'
+			if (created.length > 1) toast.success(`已加入 ${created.length} 個物品`)
 		} else {
-			toast.error('加入物品失敗，請稍後再試')
+			toast.error(created.length > 0 ? '部分物品加入失敗' : '加入物品失敗，請稍後再試')
 		}
 	}
 	async function toggle(item: Item) {
@@ -245,7 +256,7 @@
 				<form class="mt-5 grid gap-2 sm:grid-cols-[minmax(0,1fr)_100px_auto]" onsubmit={addItem}>
 					<Input
 						bind:value={itemName}
-						placeholder="加入物品，例如：護照"
+						placeholder="加入物品，可用逗號一次多個：護照, 充電器"
 						class="rounded-none border-black/20 bg-[#fbfcf8]"
 					/><Input
 						type="number"

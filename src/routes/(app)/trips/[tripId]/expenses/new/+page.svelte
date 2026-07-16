@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { goto } from '$app/navigation'
 	import { ArrowLeft, Plus, Trash2 } from '@lucide/svelte'
 	import { Button } from '$lib/components/ui/button'
 	import UserAvatar from '$lib/components/user-avatar.svelte'
+	import { toast } from '$lib/stores/toast'
 	import { Input } from '$lib/components/ui/input'
 	import { Textarea } from '$lib/components/ui/textarea'
 	import { onMount } from 'svelte'
@@ -39,6 +41,9 @@
 	let payerAmount = $state<Record<string, string>>({})
 	let participantEnabled = $state<Record<string, boolean>>({})
 	let participantValue = $state<Record<string, string>>({})
+
+	let step = $state(1)
+	const STEPS = ['基本資訊', '金額', '付款人', '分攤與確認']
 
 	let itemsTotal = $derived(items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0))
 	let totalAmount = $derived(useItems ? itemsTotal : parseFloat(directAmount) || 0)
@@ -114,6 +119,51 @@
 
 	function memberLabel(m: TripMember) {
 		return m.name || m.email
+	}
+
+	function memberLabelById(userId: string) {
+		const member = members.find((m) => m.userId === userId)
+		return member ? memberLabel(member) : userId
+	}
+
+	function validateStep(current: number): string {
+		if (current === 1) {
+			if (!title.trim()) return '請輸入費用名稱。'
+			if (!date) return '請選擇日期。'
+			return ''
+		}
+		if (current === 2) {
+			if (totalAmount <= 0) return '請輸入有效金額。'
+			if (useItems) {
+				const validItems = items.filter((i) => i.name.trim() && parseFloat(i.amount) > 0)
+				if (validItems.length === 0) return '請至少新增一個有效項目。'
+				if (validItems.some((i) => i.participantIds.length === 0))
+					return '每個項目至少需要一位參與者。'
+			}
+			return ''
+		}
+		if (current === 3) {
+			if (activePayers.length === 0) return '請至少選擇一位付款人。'
+			if (Math.abs(payerTotal - totalAmount) > 0.01)
+				return `付款人合計 ${payerTotal.toFixed(2)} 必須等於總金額 ${totalAmount.toFixed(2)}`
+			return ''
+		}
+		return ''
+	}
+
+	function nextStep() {
+		const error = validateStep(step)
+		if (error) {
+			message = error
+			return
+		}
+		message = ''
+		step += 1
+	}
+
+	function prevStep() {
+		message = ''
+		step -= 1
 	}
 
 	function allMemberIds() {
@@ -197,6 +247,10 @@
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault()
+		if (step < 4) {
+			nextStep()
+			return
+		}
 		message = ''
 
 		if (totalAmount <= 0) {
@@ -292,7 +346,9 @@
 		)
 
 		if (res.ok) {
-			location.href = `/trips/${data.trip.id}/expenses`
+			toast.success(editingBillId ? '費用已更新' : '費用已儲存')
+			// eslint-disable-next-line svelte/no-navigation-without-resolve
+			await goto(`/trips/${data.trip.id}/expenses`)
 		} else {
 			message = '儲存失敗，請確認所有欄位。'
 			submitting = false
@@ -319,323 +375,440 @@
 		</div>
 	{:else}
 		<form class="mt-8 grid gap-4" onsubmit={submit}>
+			<!-- Stepper -->
+			<div class="grid grid-cols-4 gap-1">
+				{#each STEPS as label, index (label)}
+					{@const stepNumber = index + 1}
+					<button
+						type="button"
+						disabled={stepNumber > step}
+						class="border px-2 py-2 text-center transition {step === stepNumber
+							? 'border-black bg-[#d8ff36]'
+							: stepNumber < step
+								? 'border-black/20 bg-white hover:border-black'
+								: 'border-black/10 bg-white opacity-40'}"
+						onclick={() => {
+							if (stepNumber < step) {
+								step = stepNumber
+								message = ''
+							}
+						}}
+					>
+						<span class="block font-mono text-[10px] font-bold text-black/40">0{stepNumber}</span>
+						<span class="block text-xs font-bold">{label}</span>
+					</button>
+				{/each}
+			</div>
+
 			{#if message}
 				<p class="bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>
 			{/if}
 
-			<!-- Section 1: Basic Info -->
-			<section class="border border-black/10 bg-white p-5 sm:p-8">
-				<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">
-					01 / 基本資訊
-				</p>
-				<div class="grid gap-4">
-					<label class="grid gap-2 text-sm font-bold">
-						費用名稱
-						<Input
-							bind:value={title}
-							placeholder="例如：晚餐、計程車、住宿"
-							required
-							class="rounded-none border-black/20 bg-[#fbfcf8]"
-						/>
-					</label>
-					<div class="grid gap-4 sm:grid-cols-2">
+			{#if step === 1}
+				<!-- Section 1: Basic Info -->
+				<section class="border border-black/10 bg-white p-5 sm:p-8">
+					<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">
+						01 / 基本資訊
+					</p>
+					<div class="grid gap-4">
 						<label class="grid gap-2 text-sm font-bold">
-							日期
+							費用名稱
 							<Input
-								type="date"
-								bind:value={date}
+								bind:value={title}
+								placeholder="例如：晚餐、計程車、住宿"
 								required
 								class="rounded-none border-black/20 bg-[#fbfcf8]"
 							/>
 						</label>
+						<div class="grid gap-4 sm:grid-cols-2">
+							<label class="grid gap-2 text-sm font-bold">
+								日期
+								<Input
+									type="date"
+									bind:value={date}
+									required
+									class="rounded-none border-black/20 bg-[#fbfcf8]"
+								/>
+							</label>
+							<label class="grid gap-2 text-sm font-bold">
+								分類
+								<select
+									bind:value={category}
+									class="h-9 rounded-none border border-black/20 bg-[#fbfcf8] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[#d8ff36]"
+								>
+									<option value="">不指定</option>
+									{#each CATEGORIES as c (c)}
+										<option value={c}>{c}</option>
+									{/each}
+								</select>
+							</label>
+						</div>
 						<label class="grid gap-2 text-sm font-bold">
-							分類
-							<select
-								bind:value={category}
-								class="h-9 rounded-none border border-black/20 bg-[#fbfcf8] px-3 text-sm focus:outline-none focus:ring-1 focus:ring-[#d8ff36]"
-							>
-								<option value="">不指定</option>
-								{#each CATEGORIES as c (c)}
-									<option value={c}>{c}</option>
-								{/each}
-							</select>
+							備註
+							<Textarea
+								bind:value={notes}
+								placeholder="附加說明（選填）"
+								class="rounded-none border-black/20 bg-[#fbfcf8]"
+							/>
 						</label>
 					</div>
-					<label class="grid gap-2 text-sm font-bold">
-						備註
-						<Textarea
-							bind:value={notes}
-							placeholder="附加說明（選填）"
-							class="rounded-none border-black/20 bg-[#fbfcf8]"
-						/>
-					</label>
-				</div>
-			</section>
+				</section>
+			{/if}
 
-			<!-- Section 2: Amount / Items -->
-			<section class="border border-black/10 bg-white p-5 sm:p-8">
-				<div class="mb-4 flex items-center justify-between">
-					<p class="font-mono text-[10px] font-bold tracking-widest text-black/40">02 / 金額</p>
-					<label class="flex cursor-pointer items-center gap-2 text-sm font-bold">
-						<input type="checkbox" bind:checked={useItems} class="accent-[#d8ff36]" />
-						逐項輸入
-					</label>
-				</div>
+			{#if step === 2}
+				<!-- Section 2: Amount / Items -->
+				<section class="border border-black/10 bg-white p-5 sm:p-8">
+					<div class="mb-4 flex items-center justify-between">
+						<p class="font-mono text-[10px] font-bold tracking-widest text-black/40">02 / 金額</p>
+						<label class="flex cursor-pointer items-center gap-2 text-sm font-bold">
+							<input type="checkbox" bind:checked={useItems} class="accent-[#d8ff36]" />
+							逐項輸入
+						</label>
+					</div>
 
-				{#if !useItems}
-					<label class="grid gap-2 text-sm font-bold">
-						總金額 ({data.trip.currency})
-						<Input
-							type="number"
-							min="0.01"
-							step="0.01"
-							bind:value={directAmount}
-							placeholder="0.00"
-							class="rounded-none border-black/20 bg-[#fbfcf8]"
-						/>
-					</label>
-				{:else}
-					<div class="grid gap-3">
-						{#each items as item, i (i)}
-							<div class="border border-black/10 bg-[#fbfcf8] p-3">
-								<div class="flex items-center gap-2">
-									<Input
-										bind:value={item.name}
-										placeholder="項目名稱"
-										class="flex-1 rounded-none border-black/20 bg-white"
-									/>
-									<Input
-										type="number"
-										min="0"
-										step="0.01"
-										bind:value={item.amount}
-										placeholder="0.00"
-										class="w-28 rounded-none border-black/20 bg-white"
-									/>
-									<button
-										type="button"
-										onclick={() => removeItem(i)}
-										class="grid size-9 shrink-0 place-items-center border border-black/10 bg-white hover:border-red-200 hover:bg-red-50"
-									>
-										<Trash2 class="size-4 text-black/40" />
-									</button>
-								</div>
-								<!-- Per-item participant selection -->
-								<div class="mt-2 flex flex-wrap gap-1.5">
-									{#each members as m (m.userId)}
+					{#if !useItems}
+						<label class="grid gap-2 text-sm font-bold">
+							總金額 ({data.trip.currency})
+							<Input
+								type="number"
+								min="0.01"
+								step="0.01"
+								bind:value={directAmount}
+								placeholder="0.00"
+								class="rounded-none border-black/20 bg-[#fbfcf8]"
+							/>
+						</label>
+					{:else}
+						<div class="grid gap-3">
+							{#each items as item, i (i)}
+								<div class="border border-black/10 bg-[#fbfcf8] p-3">
+									<div class="flex items-center gap-2">
+										<Input
+											bind:value={item.name}
+											placeholder="項目名稱"
+											class="flex-1 rounded-none border-black/20 bg-white"
+										/>
+										<Input
+											type="number"
+											min="0"
+											step="0.01"
+											bind:value={item.amount}
+											placeholder="0.00"
+											class="w-28 rounded-none border-black/20 bg-white"
+										/>
 										<button
 											type="button"
-											onclick={() => toggleItemParticipant(i, m.userId)}
-											class="border px-2 py-0.5 font-mono text-[11px] font-bold transition {item.participantIds.includes(
-												m.userId
-											)
-												? 'border-black bg-[#d8ff36] text-black'
-												: 'border-black/20 bg-white text-black/40 hover:border-black/40'}"
+											onclick={() => removeItem(i)}
+											class="grid size-9 shrink-0 place-items-center border border-black/10 bg-white hover:border-red-200 hover:bg-red-50"
 										>
-											{memberLabel(m)}
+											<Trash2 class="size-4 text-black/40" />
 										</button>
+									</div>
+									<!-- Per-item participant selection -->
+									<div class="mt-2 flex flex-wrap gap-1.5">
+										{#each members as m (m.userId)}
+											<button
+												type="button"
+												onclick={() => toggleItemParticipant(i, m.userId)}
+												class="border px-2 py-0.5 font-mono text-[11px] font-bold transition {item.participantIds.includes(
+													m.userId
+												)
+													? 'border-black bg-[#d8ff36] text-black'
+													: 'border-black/20 bg-white text-black/40 hover:border-black/40'}"
+											>
+												{memberLabel(m)}
+											</button>
+										{/each}
+									</div>
+								</div>
+							{/each}
+							<button
+								type="button"
+								onclick={addItem}
+								class="flex h-9 items-center gap-2 border border-dashed border-black/20 px-3 text-sm text-black/50 hover:border-black/40 hover:text-black/70"
+							>
+								<Plus class="size-4" /> 新增項目
+							</button>
+						</div>
+
+						<!-- Itemized per-person summary -->
+						{#if itemsTotal > 0 && Object.keys(itemizedPerPerson).length > 0}
+							<div class="mt-4 border-t border-black/10 pt-4">
+								<p class="mb-2 font-mono text-[10px] font-bold tracking-widest text-black/40">
+									每人小計
+								</p>
+								<div class="grid gap-1">
+									{#each members.filter((m) => itemizedPerPerson[m.userId] > 0) as m (m.userId)}
+										<div class="flex justify-between text-sm">
+											<span class="text-black/70">{memberLabel(m)}</span>
+											<span class="font-mono font-bold">
+												{data.trip.currency}
+												{(itemizedPerPerson[m.userId] ?? 0).toFixed(2)}
+											</span>
+										</div>
 									{/each}
 								</div>
+								<div class="mt-2 flex justify-between border-t border-black/10 pt-2">
+									<span class="text-sm text-black/50">合計</span>
+									<span class="font-mono font-bold"
+										>{data.trip.currency} {itemsTotal.toFixed(2)}</span
+									>
+								</div>
 							</div>
-						{/each}
-						<button
-							type="button"
-							onclick={addItem}
-							class="flex h-9 items-center gap-2 border border-dashed border-black/20 px-3 text-sm text-black/50 hover:border-black/40 hover:text-black/70"
-						>
-							<Plus class="size-4" /> 新增項目
-						</button>
-					</div>
-
-					<!-- Itemized per-person summary -->
-					{#if itemsTotal > 0 && Object.keys(itemizedPerPerson).length > 0}
-						<div class="mt-4 border-t border-black/10 pt-4">
-							<p class="mb-2 font-mono text-[10px] font-bold tracking-widest text-black/40">
-								每人小計
-							</p>
-							<div class="grid gap-1">
-								{#each members.filter((m) => itemizedPerPerson[m.userId] > 0) as m (m.userId)}
-									<div class="flex justify-between text-sm">
-										<span class="text-black/70">{memberLabel(m)}</span>
-										<span class="font-mono font-bold">
-											{data.trip.currency}
-											{(itemizedPerPerson[m.userId] ?? 0).toFixed(2)}
-										</span>
-									</div>
-								{/each}
-							</div>
-							<div class="mt-2 flex justify-between border-t border-black/10 pt-2">
-								<span class="text-sm text-black/50">合計</span>
-								<span class="font-mono font-bold">{data.trip.currency} {itemsTotal.toFixed(2)}</span
-								>
-							</div>
-						</div>
+						{/if}
 					{/if}
-				{/if}
-			</section>
+				</section>
+			{/if}
 
-			<!-- Section 3: Payers -->
-			<section class="border border-black/10 bg-white p-5 sm:p-8">
-				<p class="mb-1 font-mono text-[10px] font-bold tracking-widest text-black/40">
-					03 / 付款人
-				</p>
-				<p class="mb-4 text-xs text-black/45">實際出錢的成員，可多人共同付款</p>
-				<div class="grid gap-2">
-					{#each members as m (m.userId)}
-						<div class="flex items-center gap-3">
-							<input
-								type="checkbox"
-								id="payer-{m.userId}"
-								bind:checked={payerEnabled[m.userId]}
-								class="size-4 accent-[#d8ff36]"
-							/>
-							<UserAvatar name={memberLabel(m)} image={m.image} class="size-6 text-[10px]" />
-							<label for="payer-{m.userId}" class="flex-1 cursor-pointer text-sm font-bold">
-								{memberLabel(m)}
-								{#if m.userId === data.user.id}
-									<span class="ml-1 font-mono text-[10px] text-black/40">（我）</span>
-								{/if}
-							</label>
-							<div class="w-28 shrink-0 {payerEnabled[m.userId] ? '' : 'invisible'}">
-								<Input
-									type="number"
-									min="0"
-									step="0.01"
-									bind:value={payerAmount[m.userId]}
-									placeholder="金額"
-									class="w-full rounded-none border-black/20 bg-[#fbfcf8]"
-								/>
-							</div>
-						</div>
-					{/each}
-				</div>
-				{#if totalAmount > 0}
-					<div class="mt-4 flex justify-between border-t border-black/10 pt-3 text-xs">
-						<span class="text-black/50">已分配付款</span>
-						<span
-							class="font-mono font-bold {Math.abs(payerTotal - totalAmount) < 0.01
-								? 'text-green-700'
-								: payerTotal > 0
-									? 'text-red-500'
-									: 'text-black/50'}"
-						>
-							{data.trip.currency}
-							{payerTotal.toFixed(2)} / {totalAmount.toFixed(2)}
-						</span>
-					</div>
-				{/if}
-			</section>
-
-			<!-- Sections 04 + 05: only shown when NOT using itemized mode -->
-			{#if !useItems}
+			{#if step === 3}
+				<!-- Section 3: Payers -->
 				<section class="border border-black/10 bg-white p-5 sm:p-8">
-					<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">
-						04 / 分攤方式
+					<p class="mb-1 font-mono text-[10px] font-bold tracking-widest text-black/40">
+						03 / 付款人
 					</p>
-					<div class="grid grid-cols-3 gap-2">
-						{#each SPLIT_METHODS as m (m.value)}
-							<label
-								class="cursor-pointer border p-3 text-center text-sm font-bold transition {splitMethod ===
-								m.value
-									? 'border-black bg-[#d8ff36]'
-									: 'border-black/15 bg-white hover:border-black/40'}"
-							>
-								<input
-									type="radio"
-									name="splitMethod"
-									value={m.value}
-									bind:group={splitMethod}
-									class="sr-only"
-								/>
-								{m.label}
-							</label>
-						{/each}
-					</div>
-
-					<p class="mb-1 mt-6 font-mono text-[10px] font-bold tracking-widest text-black/40">
-						05 / 參與者
-					</p>
-					<p class="mb-4 text-xs text-black/45">需要分攤費用的成員</p>
+					<p class="mb-4 text-xs text-black/45">實際出錢的成員，可多人共同付款</p>
 					<div class="grid gap-2">
 						{#each members as m (m.userId)}
 							<div class="flex items-center gap-3">
 								<input
 									type="checkbox"
-									id="participant-{m.userId}"
-									bind:checked={participantEnabled[m.userId]}
+									id="payer-{m.userId}"
+									bind:checked={payerEnabled[m.userId]}
 									class="size-4 accent-[#d8ff36]"
 								/>
 								<UserAvatar name={memberLabel(m)} image={m.image} class="size-6 text-[10px]" />
-								<label for="participant-{m.userId}" class="flex-1 cursor-pointer text-sm font-bold">
+								<label for="payer-{m.userId}" class="flex-1 cursor-pointer text-sm font-bold">
 									{memberLabel(m)}
 									{#if m.userId === data.user.id}
 										<span class="ml-1 font-mono text-[10px] text-black/40">（我）</span>
 									{/if}
 								</label>
-								{#if splitMethod !== 'equal'}
-									<div class="w-20 shrink-0 {participantEnabled[m.userId] ? '' : 'invisible'}">
-										<Input
-											type="number"
-											min="0"
-											step={splitMethod === 'percentage' ? '0.1' : '0.01'}
-											bind:value={participantValue[m.userId]}
-											placeholder={splitMethod === 'percentage' ? '%' : '金額'}
-											class="w-full rounded-none border-black/20 bg-[#fbfcf8]"
-										/>
-									</div>
-								{/if}
-								<span
-									class="w-24 shrink-0 text-right font-mono text-sm font-bold {participantEnabled[
-										m.userId
-									] && totalAmount > 0
-										? ''
-										: 'invisible'}"
-								>
-									{data.trip.currency}
-									{(perPerson[m.userId] ?? 0).toFixed(2)}
-								</span>
+								<div class="w-28 shrink-0 {payerEnabled[m.userId] ? '' : 'invisible'}">
+									<Input
+										type="number"
+										min="0"
+										step="0.01"
+										bind:value={payerAmount[m.userId]}
+										placeholder="金額"
+										class="w-full rounded-none border-black/20 bg-[#fbfcf8]"
+									/>
+								</div>
 							</div>
 						{/each}
 					</div>
-
-					{#if splitMethod === 'percentage' && activeParticipants.length > 0}
+					{#if totalAmount > 0}
 						<div class="mt-4 flex justify-between border-t border-black/10 pt-3 text-xs">
-							<span class="text-black/50">百分比合計</span>
+							<span class="text-black/50">已分配付款</span>
 							<span
-								class="font-mono font-bold {Math.abs(percentageTotal - 100) < 0.01
+								class="font-mono font-bold {Math.abs(payerTotal - totalAmount) < 0.01
 									? 'text-green-700'
-									: percentageTotal > 0
-										? 'text-red-500'
-										: 'text-black/50'}"
-							>
-								{percentageTotal.toFixed(1)}%
-							</span>
-						</div>
-					{:else if splitMethod === 'fixed' && activeParticipants.length > 0 && totalAmount > 0}
-						<div class="mt-4 flex justify-between border-t border-black/10 pt-3 text-xs">
-							<span class="text-black/50">已分配金額</span>
-							<span
-								class="font-mono font-bold {Math.abs(fixedTotal - totalAmount) < 0.01
-									? 'text-green-700'
-									: fixedTotal > 0
+									: payerTotal > 0
 										? 'text-red-500'
 										: 'text-black/50'}"
 							>
 								{data.trip.currency}
-								{fixedTotal.toFixed(2)} / {totalAmount.toFixed(2)}
+								{payerTotal.toFixed(2)} / {totalAmount.toFixed(2)}
 							</span>
 						</div>
 					{/if}
 				</section>
 			{/if}
 
-			<Button
-				type="submit"
-				disabled={submitting}
-				class="h-11 rounded-none bg-[#d8ff36] font-bold text-black hover:bg-[#c8ef28] disabled:opacity-50"
-			>
-				{submitting ? '儲存中…' : '儲存費用'}
-			</Button>
+			{#if step === 4}
+				<!-- Sections 04 + 05: only shown when NOT using itemized mode -->
+				{#if !useItems}
+					<section class="border border-black/10 bg-white p-5 sm:p-8">
+						<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">
+							04 / 分攤方式
+						</p>
+						<div class="grid grid-cols-3 gap-2">
+							{#each SPLIT_METHODS as m (m.value)}
+								<label
+									class="cursor-pointer border p-3 text-center text-sm font-bold transition {splitMethod ===
+									m.value
+										? 'border-black bg-[#d8ff36]'
+										: 'border-black/15 bg-white hover:border-black/40'}"
+								>
+									<input
+										type="radio"
+										name="splitMethod"
+										value={m.value}
+										bind:group={splitMethod}
+										class="sr-only"
+									/>
+									{m.label}
+								</label>
+							{/each}
+						</div>
+
+						<p class="mb-1 mt-6 font-mono text-[10px] font-bold tracking-widest text-black/40">
+							05 / 參與者
+						</p>
+						<p class="mb-4 text-xs text-black/45">需要分攤費用的成員</p>
+						<div class="grid gap-2">
+							{#each members as m (m.userId)}
+								<div class="flex items-center gap-3">
+									<input
+										type="checkbox"
+										id="participant-{m.userId}"
+										bind:checked={participantEnabled[m.userId]}
+										class="size-4 accent-[#d8ff36]"
+									/>
+									<UserAvatar name={memberLabel(m)} image={m.image} class="size-6 text-[10px]" />
+									<label
+										for="participant-{m.userId}"
+										class="flex-1 cursor-pointer text-sm font-bold"
+									>
+										{memberLabel(m)}
+										{#if m.userId === data.user.id}
+											<span class="ml-1 font-mono text-[10px] text-black/40">（我）</span>
+										{/if}
+									</label>
+									{#if splitMethod !== 'equal'}
+										<div class="w-20 shrink-0 {participantEnabled[m.userId] ? '' : 'invisible'}">
+											<Input
+												type="number"
+												min="0"
+												step={splitMethod === 'percentage' ? '0.1' : '0.01'}
+												bind:value={participantValue[m.userId]}
+												placeholder={splitMethod === 'percentage' ? '%' : '金額'}
+												class="w-full rounded-none border-black/20 bg-[#fbfcf8]"
+											/>
+										</div>
+									{/if}
+									<span
+										class="w-24 shrink-0 text-right font-mono text-sm font-bold {participantEnabled[
+											m.userId
+										] && totalAmount > 0
+											? ''
+											: 'invisible'}"
+									>
+										{data.trip.currency}
+										{(perPerson[m.userId] ?? 0).toFixed(2)}
+									</span>
+								</div>
+							{/each}
+						</div>
+
+						{#if splitMethod === 'percentage' && activeParticipants.length > 0}
+							<div class="mt-4 flex justify-between border-t border-black/10 pt-3 text-xs">
+								<span class="text-black/50">百分比合計</span>
+								<span
+									class="font-mono font-bold {Math.abs(percentageTotal - 100) < 0.01
+										? 'text-green-700'
+										: percentageTotal > 0
+											? 'text-red-500'
+											: 'text-black/50'}"
+								>
+									{percentageTotal.toFixed(1)}%
+								</span>
+							</div>
+						{:else if splitMethod === 'fixed' && activeParticipants.length > 0 && totalAmount > 0}
+							<div class="mt-4 flex justify-between border-t border-black/10 pt-3 text-xs">
+								<span class="text-black/50">已分配金額</span>
+								<span
+									class="font-mono font-bold {Math.abs(fixedTotal - totalAmount) < 0.01
+										? 'text-green-700'
+										: fixedTotal > 0
+											? 'text-red-500'
+											: 'text-black/50'}"
+								>
+									{data.trip.currency}
+									{fixedTotal.toFixed(2)} / {totalAmount.toFixed(2)}
+								</span>
+							</div>
+						{/if}
+					</section>
+				{/if}
+
+				<!-- 確認總覽 -->
+				<section class="border border-black/10 bg-white p-5 sm:p-8">
+					<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">確認</p>
+					<div class="grid gap-2 text-sm">
+						<div class="flex justify-between">
+							<span class="text-black/50">費用名稱</span>
+							<span class="font-bold">{title}</span>
+						</div>
+						<div class="flex justify-between">
+							<span class="text-black/50">日期</span>
+							<span class="font-mono font-bold">{date}</span>
+						</div>
+						{#if category}
+							<div class="flex justify-between">
+								<span class="text-black/50">分類</span>
+								<span class="font-bold">{category}</span>
+							</div>
+						{/if}
+						<div class="flex justify-between">
+							<span class="text-black/50">總金額</span>
+							<span class="font-mono font-bold">{data.trip.currency} {totalAmount.toFixed(2)}</span>
+						</div>
+						<div class="flex justify-between gap-4">
+							<span class="shrink-0 text-black/50">付款人</span>
+							<span class="text-right font-bold">
+								{activePayers
+									.map(
+										(uid) =>
+											`${memberLabelById(uid)} ${(parseFloat(payerAmount[uid]) || 0).toFixed(2)}`
+									)
+									.join('、')}
+							</span>
+						</div>
+					</div>
+					<div class="mt-4 border-t border-black/10 pt-3">
+						<p class="mb-2 font-mono text-[10px] font-bold tracking-widest text-black/40">
+							每人應付
+						</p>
+						<div class="grid gap-1">
+							{#each members.filter((m) => (useItems ? (itemizedPerPerson[m.userId] ?? 0) : (perPerson[m.userId] ?? 0)) > 0) as m (m.userId)}
+								<div class="flex justify-between text-sm">
+									<span class="text-black/70">{memberLabel(m)}</span>
+									<span class="font-mono font-bold">
+										{data.trip.currency}
+										{(useItems
+											? (itemizedPerPerson[m.userId] ?? 0)
+											: (perPerson[m.userId] ?? 0)
+										).toFixed(2)}
+									</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				</section>
+			{/if}
+
+			<!-- Step navigation -->
+			<div class="flex justify-between gap-2">
+				{#if step > 1}
+					<Button
+						type="button"
+						variant="outline"
+						class="h-11 rounded-none border-black/20 px-5 font-bold hover:border-black"
+						onclick={prevStep}
+					>
+						上一步
+					</Button>
+				{:else}
+					<span></span>
+				{/if}
+				{#if step < 4}
+					<Button
+						type="button"
+						class="h-11 rounded-none bg-[#151817] px-6 font-bold text-white hover:bg-black"
+						onclick={nextStep}
+					>
+						下一步
+					</Button>
+				{:else}
+					<Button
+						type="submit"
+						disabled={submitting}
+						class="h-11 rounded-none bg-[#d8ff36] px-6 font-bold text-black hover:bg-[#c8ef28] disabled:opacity-50"
+					>
+						{submitting ? '儲存中…' : '儲存費用'}
+					</Button>
+				{/if}
+			</div>
 		</form>
 	{/if}
 </main>

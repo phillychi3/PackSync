@@ -45,7 +45,24 @@
 		title: string
 		notes: string | null
 		placeId: string | null
+		transportMode: string | null
 		place: Place | null
+	}
+
+	const TRANSPORT_OPTIONS = [
+		{ value: '', label: '不指定' },
+		{ value: 'walk', label: '步行' },
+		{ value: 'transit', label: '大眾運輸' },
+		{ value: 'drive', label: '開車' },
+		{ value: 'flight', label: '航班' },
+		{ value: 'boat', label: '船' }
+	]
+	const TRANSPORT_LABELS: Record<string, string> = {
+		walk: '步行',
+		transit: '大眾運輸',
+		drive: '開車',
+		flight: '航班',
+		boat: '船'
 	}
 	type Critical = {
 		id: string
@@ -67,7 +84,15 @@
 	let items = $state<Item[]>([])
 	let places = $state<Place[]>([])
 	let criticalItems = $state<Critical[]>([])
-	let form = $state({ date: '', startTime: '', endTime: '', title: '', notes: '', placeId: '' })
+	let form = $state({
+		date: '',
+		startTime: '',
+		endTime: '',
+		title: '',
+		notes: '',
+		placeId: '',
+		transportMode: ''
+	})
 	let editingId = $state<string | null>(null)
 	let editForm = $state({
 		date: '',
@@ -75,7 +100,8 @@
 		endTime: '',
 		title: '',
 		notes: '',
-		placeId: ''
+		placeId: '',
+		transportMode: ''
 	})
 	let saving = $state(false)
 	let placeDetails = $state({ openingHours: '', rating: '', ratingCount: '' })
@@ -101,16 +127,14 @@
 
 	let selectedDate = $state<string>('all')
 	let highlightedItemId = $state<string | null>(null)
-	let viewMode = $state<'list' | 'timeline'>('list')
+	let viewMode = $state<'list' | 'timeline' | 'calendar'>('list')
 
 	let dayGroups = $derived.by(() => {
-		const groups = new Map<string, Item[]>()
+		const groups: Record<string, Item[]> = {}
 		for (const item of sortItems(items)) {
-			const day = groups.get(item.date) ?? []
-			day.push(item)
-			groups.set(item.date, day)
+			groups[item.date] = [...(groups[item.date] ?? []), item]
 		}
-		return [...groups.entries()].map(([date, dayItems]) => ({ date, items: dayItems }))
+		return Object.entries(groups).map(([date, dayItems]) => ({ date, items: dayItems }))
 	})
 
 	let dateTabs = $derived.by(() => {
@@ -165,6 +189,59 @@
 		return `top:${top}px;height:${height}px`
 	}
 
+	// Calendar view
+	let calendarMonth = $state('')
+
+	const itemsByDate = $derived.by(() => {
+		const map: Record<string, Item[]> = {}
+		for (const item of sortItems(items)) {
+			map[item.date] = [...(map[item.date] ?? []), item]
+		}
+		return map
+	})
+
+	const calendarWeeks = $derived.by(() => {
+		if (!calendarMonth) return []
+		const firstTs = Date.parse(`${calendarMonth}-01`)
+		if (Number.isNaN(firstTs)) return []
+		const firstWeekday = new Date(firstTs).getUTCDay()
+		const [year, month] = calendarMonth.split('-').map(Number)
+		const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+		const cells: (string | null)[] = Array.from({ length: firstWeekday }, () => null)
+		for (let day = 1; day <= daysInMonth; day++) {
+			cells.push(`${calendarMonth}-${String(day).padStart(2, '0')}`)
+		}
+		while (cells.length % 7 !== 0) cells.push(null)
+		const weeks: (string | null)[][] = []
+		for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+		return weeks
+	})
+
+	function openCalendar() {
+		if (!calendarMonth) {
+			const base =
+				selectedDate !== 'all'
+					? selectedDate
+					: (data.trip.startDate ?? new Date().toISOString().slice(0, 10))
+			calendarMonth = base.slice(0, 7)
+		}
+		viewMode = 'calendar'
+	}
+
+	function shiftMonth(delta: number) {
+		const [year, month] = calendarMonth.split('-').map(Number)
+		const total = year * 12 + (month - 1) + delta
+		const nextYear = Math.floor(total / 12)
+		const nextMonth = (total % 12) + 1
+		calendarMonth = `${nextYear}-${String(nextMonth).padStart(2, '0')}`
+	}
+
+	function pickCalendarDay(day: string) {
+		selectedDate = day
+		form.date = day
+		viewMode = 'list'
+	}
+
 	function relatedCritical(item: Item) {
 		return criticalItems.filter(
 			(critical) => critical.scheduleItemId === null || critical.scheduleItemId === item.id
@@ -214,10 +291,18 @@
 				mapMarkers.push(m)
 			}
 		}
-		const routePoints = itinerary
-			.filter((item) => item.place?.lat != null && item.place?.lng != null)
-			.map((item) => [item.place!.lat!, item.place!.lng!] as [number, number])
-		drawRoutes(routePoints)
+		const withCoords = itinerary.filter(
+			(item) => item.place?.lat != null && item.place?.lng != null
+		)
+		const segments: RouteSegment[] = []
+		for (let i = 0; i < withCoords.length - 1; i++) {
+			segments.push({
+				from: [withCoords[i].place!.lat!, withCoords[i].place!.lng!],
+				to: [withCoords[i + 1].place!.lat!, withCoords[i + 1].place!.lng!],
+				mode: withCoords[i + 1].transportMode
+			})
+		}
+		drawRoutes(segments)
 		if (mapMarkers.length === 1) {
 			leafMap.setView(mapMarkers[0].getLatLng(), 14)
 		} else if (mapMarkers.length > 1) {
@@ -226,21 +311,51 @@
 		}
 	})
 
-	// Real route geometry via public OSRM; falls back to a dashed straight line
+	// Real route geometry: OSRM (FOSSGIS) for walk/drive, Transitous (MOTIS) for transit;
+	// falls back to a dashed straight line for flight/boat, uncovered regions, or on failure
+	type RouteSegment = { from: [number, number]; to: [number, number]; mode: string | null }
+	type TransitLeg = { mode: string; coords: [number, number][] }
 	const routeCache: Record<string, [number, number][]> = {}
+	const transitCache: Record<string, TransitLeg[]> = {}
 	let routeGeneration = 0
+
+	function routeProfile(mode: string | null): 'car' | 'foot' | null {
+		if (mode === 'walk') return 'foot'
+		if (mode === 'drive' || mode === null) return 'car'
+		return null
+	}
+
+	async function fetchTransitRoute(
+		from: [number, number],
+		to: [number, number]
+	): Promise<TransitLeg[]> {
+		const key = `${from[0]},${from[1]};${to[0]},${to[1]}`
+		if (transitCache[key]) return transitCache[key]
+		try {
+			const res = await fetch(
+				`/api/trips/${data.trip.id}/transit-route?fromLat=${from[0]}&fromLng=${from[1]}&toLat=${to[0]}&toLng=${to[1]}`
+			)
+			if (!res.ok) return []
+			const body = (await res.json()) as { legs: TransitLeg[] }
+			transitCache[key] = body.legs
+			return body.legs
+		} catch {
+			return []
+		}
+	}
 
 	async function fetchRoute(
 		from: [number, number],
-		to: [number, number]
+		to: [number, number],
+		profile: 'car' | 'foot'
 	): Promise<[number, number][] | null> {
 		// Long segments (flights, ferries) don't have road routes
 		if (Math.abs(from[0] - to[0]) + Math.abs(from[1] - to[1]) > 3) return null
-		const key = `${from[0]},${from[1]};${to[0]},${to[1]}`
+		const key = `${profile}:${from[0]},${from[1]};${to[0]},${to[1]}`
 		if (routeCache[key]) return routeCache[key]
 		try {
 			const res = await fetch(
-				`https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`
+				`https://routing.openstreetmap.de/routed-${profile}/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`
 			)
 			if (!res.ok) return null
 			const body = await res.json()
@@ -254,18 +369,33 @@
 		}
 	}
 
-	async function drawRoutes(points: [number, number][]) {
+	async function drawRoutes(segments: RouteSegment[]) {
 		const generation = ++routeGeneration
-		if (!L || !leafMap || points.length < 2) return
-		for (let i = 0; i < points.length - 1; i++) {
-			const geometry = await fetchRoute(points[i], points[i + 1])
+		if (!L || !leafMap || segments.length === 0) return
+		for (const segment of segments) {
+			if (segment.mode === 'transit') {
+				const legs = await fetchTransitRoute(segment.from, segment.to)
+				if (generation !== routeGeneration || !L || !leafMap) return
+				if (legs.length > 0) {
+					for (const leg of legs) {
+						const style =
+							leg.mode === 'WALK'
+								? { color: '#779a00', weight: 3, opacity: 0.85, dashArray: '1 7' }
+								: { color: '#4a6b00', weight: 4, opacity: 0.85 }
+						mapRoutes.push(L.polyline(leg.coords, style).addTo(leafMap))
+					}
+					continue
+				}
+			}
+			const profile = routeProfile(segment.mode)
+			const geometry = profile ? await fetchRoute(segment.from, segment.to, profile) : null
 			if (generation !== routeGeneration || !L || !leafMap) return
-			const line = L.polyline(
-				geometry ?? [points[i], points[i + 1]],
-				geometry
-					? { color: '#779a00', weight: 4, opacity: 0.8 }
-					: { color: '#779a00', weight: 4, opacity: 0.75, dashArray: '8 8' }
-			).addTo(leafMap)
+			const style = geometry
+				? profile === 'foot'
+					? { color: '#779a00', weight: 3, opacity: 0.85, dashArray: '1 7' }
+					: { color: '#779a00', weight: 4, opacity: 0.8 }
+				: { color: '#779a00', weight: 4, opacity: 0.75, dashArray: '8 8' }
+			const line = L.polyline(geometry ?? [segment.from, segment.to], style).addTo(leafMap)
 			mapRoutes.push(line)
 		}
 	}
@@ -378,11 +508,15 @@
 		const response = await fetch(`/api/trips/${data.trip.id}/itinerary`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ ...form, placeId: form.placeId || null })
+			body: JSON.stringify({
+				...form,
+				placeId: form.placeId || null,
+				transportMode: form.transportMode || null
+			})
 		})
 		if (response.ok) {
 			items = sortItems([...items, await response.json()])
-			form = { ...form, title: '', notes: '', placeId: '' }
+			form = { ...form, title: '', notes: '', placeId: '', transportMode: '' }
 			toast.success('已加入行程')
 		} else {
 			toast.error('新增行程失敗，請稍後再試')
@@ -399,7 +533,8 @@
 			endTime: item.endTime ?? '',
 			title: item.title,
 			notes: item.notes ?? '',
-			placeId: item.placeId ?? ''
+			placeId: item.placeId ?? '',
+			transportMode: item.transportMode ?? ''
 		}
 	}
 
@@ -408,7 +543,11 @@
 		const res = await fetch(`/api/trips/${data.trip.id}/itinerary/${id}`, {
 			method: 'PUT',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ ...editForm, placeId: editForm.placeId || null })
+			body: JSON.stringify({
+				...editForm,
+				placeId: editForm.placeId || null,
+				transportMode: editForm.transportMode || null
+			})
 		})
 		if (res.ok) {
 			const updated = await res.json()
@@ -450,7 +589,8 @@
 							endTime: target.endTime ?? '',
 							title: target.title,
 							notes: target.notes ?? '',
-							placeId: target.placeId
+							placeId: target.placeId,
+							transportMode: target.transportMode
 						})
 					})
 					if (restore.ok) {
@@ -507,13 +647,16 @@
 
 	<!-- View toggle -->
 	<div class="mt-6 flex gap-1">
-		{#each [{ value: 'list', label: '清單' }, { value: 'timeline', label: '時間表' }] as mode (mode.value)}
+		{#each [{ value: 'list', label: '清單' }, { value: 'timeline', label: '時間表' }, { value: 'calendar', label: '月曆' }] as mode (mode.value)}
 			<button
 				type="button"
 				class="border px-3 py-1.5 font-mono text-xs font-bold transition {viewMode === mode.value
 					? 'border-black bg-[#151817] text-white'
 					: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
-				onclick={() => (viewMode = mode.value as 'list' | 'timeline')}
+				onclick={() =>
+					mode.value === 'calendar'
+						? openCalendar()
+						: (viewMode = mode.value as 'list' | 'timeline')}
 			>
 				{mode.label}
 			</button>
@@ -630,6 +773,72 @@
 						{/if}
 					</div>
 				</div>
+			{:else if viewMode === 'calendar'}
+				<div class="border border-black/10 bg-white">
+					<div class="flex items-center justify-between border-b border-black/10 px-4 py-3">
+						<button
+							type="button"
+							class="grid size-8 place-items-center border border-black/15 hover:border-black"
+							aria-label="上一個月"
+							onclick={() => shiftMonth(-1)}
+						>
+							‹
+						</button>
+						<p class="font-mono text-sm font-black">{calendarMonth}</p>
+						<button
+							type="button"
+							class="grid size-8 place-items-center border border-black/15 hover:border-black"
+							aria-label="下一個月"
+							onclick={() => shiftMonth(1)}
+						>
+							›
+						</button>
+					</div>
+					<div class="grid grid-cols-7 border-b border-black/10">
+						{#each ['日', '一', '二', '三', '四', '五', '六'] as weekday (weekday)}
+							<p class="py-2 text-center font-mono text-[10px] font-bold text-black/40">
+								{weekday}
+							</p>
+						{/each}
+					</div>
+					{#each calendarWeeks as week, weekIndex (weekIndex)}
+						<div class="grid grid-cols-7">
+							{#each week as day, dayIndex (dayIndex)}
+								{#if day}
+									{@const dayItems = itemsByDate[day] ?? []}
+									{@const inTrip = dateTabs.includes(day)}
+									<button
+										type="button"
+										class="min-h-20 border-b border-r border-black/5 p-1.5 text-left align-top transition hover:bg-[#fbffe8] {selectedDate ===
+										day
+											? 'bg-[#f4f8e8]'
+											: ''}"
+										onclick={() => pickCalendarDay(day)}
+									>
+										<span
+											class="inline-grid size-5 place-items-center font-mono text-[10px] font-bold {inTrip
+												? 'bg-[#d8ff36]'
+												: 'text-black/40'}"
+										>
+											{Number(day.slice(8, 10))}
+										</span>
+										{#each dayItems.slice(0, 2) as item (item.id)}
+											<p class="mt-0.5 truncate text-[10px] font-bold text-black/70">
+												{item.startTime ? `${item.startTime} ` : ''}{item.title}
+											</p>
+										{/each}
+										{#if dayItems.length > 2}
+											<p class="mt-0.5 text-[10px] text-black/40">+{dayItems.length - 2} 個行程</p>
+										{/if}
+									</button>
+								{:else}
+									<div class="min-h-20 border-b border-r border-black/5 bg-[#fbfcf8]"></div>
+								{/if}
+							{/each}
+						</div>
+					{/each}
+					<p class="px-4 py-2 text-xs text-black/40">點選日期會切換到該日的清單檢視。</p>
+				</div>
 			{:else}
 				<div class="grid gap-3">
 					{#if items.length === 0}
@@ -693,6 +902,16 @@
 													required
 													class="rounded-none border-black/20 bg-[#fbfcf8]"
 												/></label
+											>
+											<label class="grid gap-1.5 text-xs font-bold"
+												>前往方式<select
+													bind:value={editForm.transportMode}
+													class="h-10 border border-black/20 bg-[#fbfcf8] px-3 text-sm"
+												>
+													{#each TRANSPORT_OPTIONS as option (option.value)}
+														<option value={option.value}>{option.label}</option>
+													{/each}
+												</select></label
 											>
 											<label class="grid gap-1.5 text-xs font-bold"
 												>備註<Textarea
@@ -822,13 +1041,20 @@
 											<div class="w-24 shrink-0 border-r border-black/10 pr-4">
 												<p class="font-mono text-xs font-bold text-[#779a00]">{item.date}</p>
 												<p class="mt-2 text-sm text-black/50">{item.startTime || '全天'}</p>
+												{#if item.transportMode}
+													<p class="mt-1 text-[10px] font-bold text-black/40">
+														{TRANSPORT_LABELS[item.transportMode] ?? item.transportMode}
+													</p>
+												{/if}
 											</div>
 											<div class="min-w-0 flex-1">
 												<h3 class="font-bold">
+													<!-- eslint-disable svelte/no-navigation-without-resolve -->
 													<a
 														href={`/trips/${data.trip.id}/itinerary/${item.id}`}
 														class="hover:text-[#779a00]">{item.title}</a
 													>
+													<!-- eslint-enable svelte/no-navigation-without-resolve -->
 												</h3>
 												{#if item.place}
 													<p class="mt-1 flex items-center gap-1 text-xs text-black/50">
@@ -862,6 +1088,7 @@
 																{@const confirmed = critical.confirmations.some(
 																	(confirmation) => confirmation.userId === data.user.id
 																)}
+																<!-- eslint-disable svelte/no-navigation-without-resolve -->
 																<a
 																	href={`/trips/${data.trip.id}/critical`}
 																	class="flex items-center justify-between gap-3 text-sm hover:text-[#779a00]"
@@ -875,6 +1102,7 @@
 																		{confirmed ? '已確認' : '待確認'}
 																	</span>
 																</a>
+																<!-- eslint-enable svelte/no-navigation-without-resolve -->
 															{/each}
 														</div>
 													</div>
@@ -977,6 +1205,16 @@
 						required
 						class="rounded-none border-black/20 bg-[#fbfcf8]"
 					/></label
+				>
+				<label class="grid gap-2 text-sm font-bold"
+					>前往方式<select
+						bind:value={form.transportMode}
+						class="h-10 border border-black/20 bg-[#fbfcf8] px-3 text-sm"
+					>
+						{#each TRANSPORT_OPTIONS as option (option.value)}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select></label
 				>
 				<!-- Place picker (add) -->
 				<div class="grid gap-2">

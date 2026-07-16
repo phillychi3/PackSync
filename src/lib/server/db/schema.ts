@@ -379,6 +379,18 @@ export const message = sqliteTable(
 	(t) => [index('message_conversation_idx').on(t.conversationId)]
 )
 
+// ─── Idempotency Key（離線佇列重送 POST 防重複） ──────────────────────────────
+
+export const idempotencyKey = sqliteTable('idempotency_key', {
+	id: text('id')
+		.primaryKey()
+		.$defaultFn(() => crypto.randomUUID()),
+	key: text('key').notNull().unique(),
+	createdAt: integer('created_at', { mode: 'timestamp_ms' })
+		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+		.notNull()
+})
+
 // ─── Notification Read（通知中心已讀狀態） ────────────────────────────────────
 
 export const notificationRead = sqliteTable(

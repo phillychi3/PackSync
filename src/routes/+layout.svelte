@@ -65,7 +65,7 @@
 		<WifiOff class="size-3.5 shrink-0" />
 		目前離線{offlineSince
 			? `（自 ${offlineSince} 起）`
-			: ''}，顯示的是快取資料；修改與刪除會暫存並在恢復連線後自動同步，新增需要連線。
+			: ''}，顯示的是快取資料；送出的變更會暫存並在恢復連線後自動同步。
 	</div>
 {/if}
 {@render children()}

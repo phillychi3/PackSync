@@ -18,11 +18,13 @@ type OutboxEntry = {
 	contentType: string
 	body: string
 	ts: number
+	// POST 重送時帶上，伺服器以此防止重複建立
+	idempotencyKey?: string
 }
 
 const OUTBOX_DB = 'packsync-outbox'
 const OUTBOX_STORE = 'requests'
-const QUEUEABLE_METHODS = ['PUT', 'PATCH', 'DELETE']
+const QUEUEABLE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
 const OFFLINE_CACHE = 'packsync-offline-v1'
 
 function openOutbox(): Promise<IDBDatabase> {
@@ -83,9 +85,12 @@ async function replayOutbox() {
 	let flushed = 0
 	for (const entry of entries.sort((a, b) => a.ts - b.ts)) {
 		try {
+			const headers: Record<string, string> = {}
+			if (entry.body) headers['content-type'] = entry.contentType
+			if (entry.idempotencyKey) headers['x-idempotency-key'] = entry.idempotencyKey
 			await fetch(entry.url, {
 				method: entry.method,
-				headers: entry.body ? { 'content-type': entry.contentType } : undefined,
+				headers: Object.keys(headers).length > 0 ? headers : undefined,
 				body: entry.body || undefined
 			})
 			if (entry.id !== undefined) await outboxDelete(entry.id)
@@ -127,7 +132,8 @@ self.addEventListener('fetch', (event) => {
 						method: event.request.method,
 						contentType: event.request.headers.get('content-type') ?? 'application/json',
 						body,
-						ts: Date.now()
+						ts: Date.now(),
+						...(event.request.method === 'POST' && { idempotencyKey: crypto.randomUUID() })
 					})
 					return new Response(
 						JSON.stringify({ queued: true, message: '目前離線，變更已暫存，恢復連線後會自動同步' }),
