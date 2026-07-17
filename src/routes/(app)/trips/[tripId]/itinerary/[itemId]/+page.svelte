@@ -123,7 +123,6 @@
 				</div>
 				<div>
 					<h2 class="text-xl font-black">出發前需要確認</h2>
-					<p class="mt-1 text-sm text-black/50">這些重要事項需要在本行程中分開確認。</p>
 				</div>
 			</div>
 

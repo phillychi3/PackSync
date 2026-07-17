@@ -13,7 +13,6 @@
 		Plane,
 		Plus,
 		Search,
-		ShieldAlert,
 		Ship,
 		TrainFront,
 		Trash2,
@@ -290,12 +289,6 @@
 		selectedDate = day
 		form.date = day
 		viewMode = 'list'
-	}
-
-	function relatedCritical(item: Item) {
-		return criticalItems.filter(
-			(critical) => critical.scheduleItemId === null || critical.scheduleItemId === item.id
-		)
 	}
 
 	$effect(() => {
@@ -1070,7 +1063,7 @@
 				shadowUrl: markerShadow
 			})
 
-			leafMap = L.map(mapEl, { scrollWheelZoom: false }).setView([25.0375, 121.5625], 5)
+			leafMap = L.map(mapEl).setView([25.0375, 121.5625], 5)
 			L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 				maxZoom: 19,
 				attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -1718,37 +1711,6 @@
 												{#if item.notes}
 													<p class="mt-1 text-sm leading-6 text-black/55">{item.notes}</p>
 												{/if}
-												{#if relatedCritical(item).length > 0}
-													<div class="mt-3 border-t border-black/10 pt-3">
-														<p
-															class="mb-2 flex items-center gap-1.5 text-xs font-bold text-[#779a00]"
-														>
-															<ShieldAlert class="size-3.5" /> 出發前需要確認
-														</p>
-														<div class="grid gap-1.5">
-															{#each relatedCritical(item) as critical (critical.id)}
-																{@const confirmed = critical.confirmations.some(
-																	(confirmation) => confirmation.userId === data.user.id
-																)}
-																<!-- eslint-disable svelte/no-navigation-without-resolve -->
-																<a
-																	href={`/trips/${data.trip.id}/critical`}
-																	class="flex items-center justify-between gap-3 text-sm hover:text-[#779a00]"
-																>
-																	<span class="min-w-0 truncate">{critical.name}</span>
-																	<span
-																		class="shrink-0 text-xs {confirmed
-																			? 'text-[#779a00]'
-																			: 'text-amber-600'}"
-																	>
-																		{confirmed ? '已確認' : '待確認'}
-																	</span>
-																</a>
-																<!-- eslint-enable svelte/no-navigation-without-resolve -->
-															{/each}
-														</div>
-													</div>
-												{/if}
 											</div>
 											<div class="flex shrink-0 gap-1">
 												{#if !readonly}
@@ -1800,7 +1762,7 @@
 				這趟旅程已完成，行程保留為紀錄，無法再修改。
 			</div>
 		{:else}
-			<form class="grid h-fit gap-4 border border-black/10 bg-white p-5" onsubmit={add}>
+			<form class="grid h-fit gap-4 border border-black/10 bg-white p-5 mt-6" onsubmit={add}>
 				<h3 class="flex items-center gap-2 text-lg font-black">
 					<CalendarDays class="size-5 text-[#779a00]" /> 新增行程
 				</h3>
