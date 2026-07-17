@@ -188,6 +188,11 @@
 				<span class="text-lg font-black tracking-[-0.05em]">PACKSYNC</span>
 			</a>
 			<div class="flex items-center gap-2">
+				<Button
+					href="https://cloudowo.com/link/cloud"
+					variant="ghost"
+					class="hidden rounded-none px-4 font-bold sm:flex">我的服務</Button
+				>
 				<Button href="/login" variant="ghost" class="hidden rounded-none px-4 font-bold sm:flex"
 					>登入</Button
 				>
@@ -401,9 +406,7 @@
 					<h2 class="mt-4 text-5xl font-black leading-[0.94] tracking-[-0.06em] sm:text-7xl">
 						資料放一起，<br /><span class="text-white/25">找起來更快。</span>
 					</h2>
-					<p class="mt-8 max-w-md leading-7 text-white/50">
-						行程、待辦、重要事項與費用。
-					</p>
+					<p class="mt-8 max-w-md leading-7 text-white/50">行程、待辦、重要事項與費用。</p>
 					<div class="mt-12 flex items-center gap-3 text-sm font-bold text-[#d8ff36]">
 						<Sparkles class="size-4" /> 需要時，再打開查看
 					</div>

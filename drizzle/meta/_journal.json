@@ -15,6 +15,13 @@
       "when": 1783936372553,
       "tag": "0001_fast_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784306659040,
+      "tag": "0002_crazy_iceman",
+      "breakpoints": true
     }
   ]
 }
