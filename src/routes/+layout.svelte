@@ -14,9 +14,6 @@
 
 	onMount(() => {
 		initializeDarkMode()
-		if ('serviceWorker' in navigator) {
-			navigator.serviceWorker.register('/service-worker.js', { type: 'module' }).catch(() => {})
-		}
 		const markOffline = () => {
 			offline = true
 			offlineSince = new Intl.DateTimeFormat('zh-TW', {

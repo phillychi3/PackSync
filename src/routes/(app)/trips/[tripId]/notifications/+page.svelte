@@ -101,9 +101,7 @@
 		pushBusy = true
 		pushMessage = ''
 		try {
-			const registration = await navigator.serviceWorker.register('/service-worker.js', {
-				type: 'module'
-			})
+			const registration = await navigator.serviceWorker.ready
 			if (pushEnabled) {
 				const subscription = await registration.pushManager.getSubscription()
 				if (subscription) {
@@ -146,9 +144,7 @@
 		fetch('/api/push/vapid-public-key').then(async (response) => {
 			pushConfigured = response.ok
 			if (response.ok && 'serviceWorker' in navigator) {
-				const registration = await navigator.serviceWorker.register('/service-worker.js', {
-					type: 'module'
-				})
+				const registration = await navigator.serviceWorker.ready
 				pushEnabled = Boolean(await registration.pushManager.getSubscription())
 			}
 		})
