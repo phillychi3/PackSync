@@ -1,13 +1,36 @@
 /// <reference lib="webworker" />
 
-import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching'
+import { build, files, version } from '$service-worker'
 
-declare const self: ServiceWorkerGlobalScope & {
-	__WB_MANIFEST: Array<{ revision: string | null; url: string }>
-}
+declare const self: ServiceWorkerGlobalScope
 
-precacheAndRoute(self.__WB_MANIFEST)
-cleanupOutdatedCaches()
+const PRECACHE_PREFIX = 'packsync-precache-'
+const PRECACHE = `${PRECACHE_PREFIX}${version}`
+const PRECACHE_ASSETS = [...build, ...files]
+
+self.addEventListener('install', (event) => {
+	event.waitUntil(
+		caches
+			.open(PRECACHE)
+			.then((cache) => cache.addAll(PRECACHE_ASSETS))
+			.then(() => self.skipWaiting())
+	)
+})
+
+self.addEventListener('activate', (event) => {
+	event.waitUntil(
+		caches
+			.keys()
+			.then((keys) =>
+				Promise.all(
+					keys
+						.filter((key) => key.startsWith(PRECACHE_PREFIX) && key !== PRECACHE)
+						.map((key) => caches.delete(key))
+				)
+			)
+			.then(() => self.clients.claim())
+	)
+})
 
 type OutboxEntry = {
 	id?: number
@@ -158,13 +181,13 @@ self.addEventListener('fetch', (event) => {
 		(async () => {
 			const cache = await caches.open(OFFLINE_CACHE)
 			const matchCached = () =>
-				cache.match(event.request).then(async (cached) => {
+				caches.match(event.request).then(async (cached) => {
 					if (cached) return cached
 					if (isSvelteKitData) {
-						return cache.match(event.request, { ignoreSearch: true })
+						return caches.match(event.request, { ignoreSearch: true })
 					}
 					if (event.request.mode === 'navigate') {
-						return cache.match(event.request, { ignoreVary: true })
+						return caches.match(event.request, { ignoreVary: true })
 					}
 					return undefined
 				})
