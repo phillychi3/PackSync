@@ -6,17 +6,22 @@
 	import markerShadow from 'leaflet/dist/images/marker-shadow.png'
 	import {
 		CalendarDays,
-		Crosshair,
+		Car,
+		Footprints,
 		MapPin,
 		Pencil,
+		Plane,
 		Plus,
 		Search,
 		ShieldAlert,
+		Ship,
+		TrainFront,
 		Trash2,
 		X
 	} from '@lucide/svelte'
 	import ActionMenu from '$lib/components/action-menu.svelte'
 	import { Button } from '$lib/components/ui/button'
+	import * as Drawer from '$lib/components/ui/drawer'
 	import { Input } from '$lib/components/ui/input'
 	import { Textarea } from '$lib/components/ui/textarea'
 	import { confirmDialog } from '$lib/stores/confirm'
@@ -24,6 +29,7 @@
 	import { offlineFetch } from '$lib/offline-fetch'
 	import { setCriticalItems, setItinerary, setTripContext } from '$lib/stores/trip'
 	import { onMount } from 'svelte'
+	import { MediaQuery } from 'svelte/reactivity'
 	import type { PageData } from './$types'
 
 	type Place = {
@@ -63,6 +69,17 @@
 		drive: '開車',
 		flight: '航班',
 		boat: '船'
+	}
+	const MODE_ICONS: Record<string, typeof Car> = {
+		walk: Footprints,
+		transit: TrainFront,
+		drive: Car,
+		flight: Plane,
+		boat: Ship
+	}
+
+	function modeIcon(mode: string) {
+		return MODE_ICONS[mode] ?? Car
 	}
 	type Critical = {
 		id: string
@@ -124,10 +141,34 @@
 	let mapMarkers: LType.Marker[] = []
 	let mapRoutes: LType.Polyline[] = []
 	let itemMarkers: Record<string, LType.Marker> = {}
+	let markerVersion = $state(0)
+	let markerEpoch = 0
+
+	function numberIcon(n: number, active: boolean) {
+		return L!.divIcon({
+			className: '',
+			html: `<div style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;border:2px solid ${active ? '#151817' : '#fff'};background:${active ? '#d8ff36' : '#151817'};color:${active ? '#151817' : '#fff'};font:700 12px/1 ui-monospace,SFMono-Regular,monospace;box-shadow:0 1px 3px rgba(0,0,0,.35)">${n || '·'}</div>`,
+			iconSize: [26, 26],
+			iconAnchor: [13, 13],
+			popupAnchor: [0, -14]
+		})
+	}
+
+	function placeDotIcon() {
+		return L!.divIcon({
+			className: '',
+			html: '<div style="width:12px;height:12px;border:2px solid #fff;background:#9ca3af;border-radius:9999px;box-shadow:0 1px 2px rgba(0,0,0,.3)"></div>',
+			iconSize: [12, 12],
+			iconAnchor: [6, 6],
+			popupAnchor: [0, -8]
+		})
+	}
 
 	let selectedDate = $state<string>('all')
 	let highlightedItemId = $state<string | null>(null)
 	let viewMode = $state<'list' | 'timeline' | 'calendar'>('list')
+	const phone = new MediaQuery('(max-width: 639px)')
+	let drawerOpen = $state(false)
 
 	let dayGroups = $derived.by(() => {
 		const groups: Record<string, Item[]> = {}
@@ -155,6 +196,15 @@
 	let visibleGroups = $derived(
 		selectedDate === 'all' ? dayGroups : dayGroups.filter((group) => group.date === selectedDate)
 	)
+
+	let visibleItems = $derived(visibleGroups.flatMap((group) => group.items))
+	let itemNumbers = $derived.by(() => {
+		const numbers: Record<string, number> = {}
+		visibleItems.forEach((item, index) => {
+			numbers[item.id] = index + 1
+		})
+		return numbers
+	})
 
 	// Timeline view
 	const HOUR_PX = 56
@@ -264,7 +314,7 @@
 			const p = item.place
 			if (!p || p.lat === null || p.lng === null) continue
 			linkedPlaceIds.push(p.id)
-			const m = L.marker([p.lat, p.lng])
+			const m = L.marker([p.lat, p.lng], { icon: numberIcon(itemNumbers[item.id] ?? 0, false) })
 				.bindPopup(
 					`<b>${item.title}</b><br><span style="font-size:12px;color:#666">${item.date}${item.startTime ? ' ' + item.startTime : ''} · ${p.name}</span>`
 				)
@@ -283,7 +333,7 @@
 				(p) => p.lat !== null && p.lng !== null && !linkedPlaceIds.includes(p.id)
 			)
 			for (const p of unlinked) {
-				const m = L.marker([p.lat!, p.lng!], { opacity: 0.5 })
+				const m = L.marker([p.lat!, p.lng!], { icon: placeDotIcon() })
 					.bindPopup(
 						`<b>${p.name}</b>${p.address ? '<br><span style="font-size:12px;color:#666">' + p.address + '</span>' : ''}`
 					)
@@ -310,6 +360,16 @@
 		} else if (mapMarkers.length > 1) {
 			const bounds = L.latLngBounds(mapMarkers.map((m) => m.getLatLng()))
 			leafMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 })
+		}
+		markerVersion = ++markerEpoch
+	})
+
+	$effect(() => {
+		void markerVersion
+		const active = highlightedItemId
+		if (!L) return
+		for (const [itemId, marker] of Object.entries(itemMarkers)) {
+			marker.setIcon(numberIcon(itemNumbers[itemId] ?? 0, itemId === active))
 		}
 	})
 
@@ -619,6 +679,61 @@
 		}
 	}
 
+	// Compact auto-loaded duration shown between consecutive stops in the panel
+	type SegmentSummary = { loading: boolean; minutes: number | null }
+	let segmentSummary = $state<Record<string, SegmentSummary>>({})
+	const summaryRequested: Record<string, true> = {}
+	let expandedSegment = $state<string | null>(null)
+
+	function summaryKey(fromItem: Item, toItem: Item) {
+		const from = itemCoords(fromItem)
+		const to = itemCoords(toItem)
+		const coords = from && to ? coordinateKey(from, to) : 'na'
+		return `${fromItem.id}:${toItem.id}:${toItem.transportMode ?? 'drive'}:${coords}`
+	}
+
+	async function loadSegmentSummary(fromItem: Item, toItem: Item) {
+		const key = summaryKey(fromItem, toItem)
+		if (summaryRequested[key]) return
+		summaryRequested[key] = true
+		const mode = toItem.transportMode ?? 'drive'
+		const from = itemCoords(fromItem)
+		const to = itemCoords(toItem)
+		if (!from || !to || mode === 'flight' || mode === 'boat') {
+			segmentSummary[key] = { loading: false, minutes: null }
+			return
+		}
+		segmentSummary[key] = { loading: true, minutes: null }
+		let minutes: number | null
+		if (mode === 'transit') {
+			const transit = await fetchTransitRoute(from, to)
+			minutes = transit.legs.length > 0 ? transit.durationMinutes : null
+		} else {
+			const route = await fetchRoute(from, to, mode === 'walk' ? 'foot' : 'car')
+			minutes = route?.durationMinutes ?? null
+		}
+		segmentSummary[key] = { loading: false, minutes }
+	}
+
+	$effect(() => {
+		for (const group of visibleGroups) {
+			for (let i = 1; i < group.items.length; i++) {
+				loadSegmentSummary(group.items[i - 1], group.items[i])
+			}
+		}
+	})
+
+	function toggleSegment(fromItem: Item, toItem: Item) {
+		const key = segmentKey(fromItem, toItem)
+		if (expandedSegment === key) {
+			expandedSegment = null
+			return
+		}
+		expandedSegment = key
+		const state = segmentOptions[key]
+		if (!state?.loaded && !state?.loading) loadSegmentOptions(fromItem, toItem)
+	}
+
 	function formatClock(value: string | null) {
 		if (!value) return ''
 		const date = new Date(value)
@@ -642,6 +757,7 @@
 		const marker = itemMarkers[item.id]
 		if (!marker || !leafMap) return
 		highlightedItemId = item.id
+		if (phone.current) drawerOpen = false
 		mapEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 		leafMap.setView(marker.getLatLng(), 16)
 		marker.openPopup()
@@ -650,6 +766,98 @@
 	$effect(() => {
 		if (!form.date && data.trip.startDate) form.date = data.trip.startDate
 	})
+
+	// Insertion suggestion: where in the day the new place fits with the least detour
+	type InsertSlot = {
+		index: number
+		prev: Item | null
+		next: Item | null
+		detourKm: number | null
+		suggestedTime: string
+		best: boolean
+	}
+
+	function distanceKm(a: [number, number], b: [number, number]) {
+		const rad = Math.PI / 180
+		const dLat = (b[0] - a[0]) * rad
+		const dLng = (b[1] - a[1]) * rad
+		const h =
+			Math.sin(dLat / 2) ** 2 +
+			Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLng / 2) ** 2
+		return 6371 * 2 * Math.asin(Math.sqrt(h))
+	}
+
+	function minutesToTime(total: number) {
+		const clamped = Math.min(Math.max(total, 0), 23 * 60 + 55)
+		const rounded = Math.round(clamped / 5) * 5
+		return `${String(Math.floor(rounded / 60)).padStart(2, '0')}:${String(rounded % 60).padStart(2, '0')}`
+	}
+
+	function suggestTime(prev: Item | null, next: Item | null) {
+		const prevEnd = prev ? (prev.endTime ?? prev.startTime) : null
+		const nextStart = next?.startTime ?? null
+		if (prevEnd && nextStart)
+			return minutesToTime(Math.floor((toMinutes(prevEnd) + toMinutes(nextStart)) / 2))
+		if (prevEnd) return minutesToTime(toMinutes(prevEnd) + 90)
+		if (nextStart) return minutesToTime(toMinutes(nextStart) - 90)
+		return ''
+	}
+
+	const formPlace = $derived(places.find((p) => p.id === form.placeId) ?? null)
+	const insertSlots = $derived.by(() => {
+		if (!formPlace || formPlace.lat === null || formPlace.lng === null) return [] as InsertSlot[]
+		const dayItems = itemsByDate[form.date] ?? []
+		if (dayItems.length === 0) return [] as InsertSlot[]
+		const target: [number, number] = [formPlace.lat, formPlace.lng]
+		let bestIndex = -1
+		let bestDetour = Infinity
+		const slots: InsertSlot[] = []
+		for (let i = 0; i <= dayItems.length; i++) {
+			const prev = i > 0 ? dayItems[i - 1] : null
+			const next = i < dayItems.length ? dayItems[i] : null
+			const prevCoords = prev ? itemCoords(prev) : null
+			const nextCoords = next ? itemCoords(next) : null
+			let detourKm: number | null = null
+			if (prevCoords && nextCoords) {
+				detourKm =
+					distanceKm(prevCoords, target) +
+					distanceKm(target, nextCoords) -
+					distanceKm(prevCoords, nextCoords)
+			} else if (prevCoords) {
+				detourKm = distanceKm(prevCoords, target)
+			} else if (nextCoords) {
+				detourKm = distanceKm(target, nextCoords)
+			}
+			if (detourKm !== null && detourKm < bestDetour) {
+				bestDetour = detourKm
+				bestIndex = i
+			}
+			slots.push({
+				index: i,
+				prev,
+				next,
+				detourKm,
+				suggestedTime: suggestTime(prev, next),
+				best: false
+			})
+		}
+		return slots.map((slot) => ({ ...slot, best: slot.index === bestIndex }))
+	})
+
+	let insertChoice = $state<number | null>(null)
+	let lastSlotContext = ''
+	$effect(() => {
+		const context = `${form.placeId}:${form.date}`
+		if (context !== lastSlotContext) {
+			lastSlotContext = context
+			insertChoice = null
+		}
+	})
+
+	function pickSlot(slot: InsertSlot) {
+		insertChoice = slot.index
+		if (slot.suggestedTime) form.startTime = slot.suggestedTime
+	}
 
 	function sortItems(arr: Item[]): Item[] {
 		return arr.slice().sort((a, b) => {
@@ -871,112 +1079,166 @@
 			mapInitialized = true
 		})()
 
-		return () => leafMap?.remove()
+		const resizeObserver = new ResizeObserver(() => leafMap?.invalidateSize())
+		resizeObserver.observe(mapEl)
+
+		return () => {
+			resizeObserver.disconnect()
+			leafMap?.remove()
+		}
 	})
 </script>
 
-<main class="mx-auto w-full max-w-7xl px-5 py-8 sm:px-8 lg:py-12">
+<main class="mx-auto w-full max-w-7xl max-sm:px-0 max-sm:py-0 sm:px-8 sm:py-8 lg:py-12">
 	<!-- Header -->
-	<div class="border-b border-black/15 pb-6">
+	<div class="border-b border-black/15 pb-6 max-sm:hidden">
 		<p class="font-mono text-xs font-bold tracking-[0.18em] text-black/45">01 / 行程</p>
 		<h2 class="mt-3 text-4xl font-black tracking-[-0.05em]">每日安排</h2>
 	</div>
 
-	<!-- View toggle -->
-	<div class="mt-6 flex gap-1">
-		{#each [{ value: 'list', label: '清單' }, { value: 'timeline', label: '時間表' }, { value: 'calendar', label: '月曆' }] as mode (mode.value)}
-			<button
-				type="button"
-				class="border px-3 py-1.5 font-mono text-xs font-bold transition {viewMode === mode.value
-					? 'border-black bg-[#151817] text-white'
-					: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
-				onclick={() =>
-					mode.value === 'calendar'
-						? openCalendar()
-						: (viewMode = mode.value as 'list' | 'timeline')}
+	<!-- Map + Panel -->
+	<div
+		class="grid gap-6 max-sm:mt-0 max-sm:gap-0 sm:mt-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start"
+	>
+		<!-- Map column -->
+		<div class="lg:sticky lg:top-6">
+			<div
+				class="relative w-full border border-black/10 max-sm:h-[calc(100dvh-12rem)] max-sm:border-x-0 sm:h-96 lg:h-[calc(100vh-8rem)]"
 			>
-				{mode.label}
-			</button>
-		{/each}
-	</div>
+				<div bind:this={mapEl} class="absolute inset-0"></div>
+				{#if !mapInitialized}
+					<div class="absolute inset-0 z-[600] grid place-items-center bg-[#eef0eb]">
+						<span class="font-mono text-xs text-black/40">地圖載入中…</span>
+					</div>
+				{/if}
+				<div
+					class="absolute bottom-3 left-3 z-[500] grid grid-cols-2 gap-x-3 gap-y-1 border border-black/15 bg-white/95 px-3 py-2 text-[10px] shadow-sm backdrop-blur"
+					aria-label="地圖路線圖例"
+				>
+					<span class="flex items-center gap-1.5"
+						><i class="w-5 border-t-2 border-dotted border-orange-600"></i>步行</span
+					>
+					<span class="flex items-center gap-1.5"
+						><i class="w-5 border-t-2 border-blue-600"></i>開車</span
+					>
+					<span class="flex items-center gap-1.5"
+						><i class="w-5 border-t-2 border-violet-600"></i>大眾運輸</span
+					>
+					<span class="flex items-center gap-1.5"
+						><i class="w-5 border-t-2 border-dashed border-cyan-700"></i>航班／船</span
+					>
+					<span class="col-span-2 flex items-center gap-1.5 text-black/50"
+						><i class="w-5 border-t-2 border-dashed border-gray-500"></i>無路線資料</span
+					>
+				</div>
+				{#if phone.current}
+					<button
+						type="button"
+						class="absolute bottom-3 right-3 z-[500] flex items-center gap-2 bg-[#151817] px-4 py-2.5 text-sm font-bold text-white shadow-lg"
+						onclick={() => (drawerOpen = true)}
+					>
+						<CalendarDays class="size-4 text-[#d8ff36]" />
+						行程列表
+						<span class="font-mono text-xs text-[#d8ff36]">{visibleItems.length}</span>
+					</button>
+				{/if}
+			</div>
+			<p class="mt-1.5 text-xs text-black/45 max-sm:hidden">
+				地圖編號對應行程順序；點擊編號或路線可查看細節。
+			</p>
+		</div>
 
-	<!-- Date tabs -->
-	{#if dateTabs.length > 0}
-		<div class="mt-3 flex gap-1 overflow-x-auto pb-1" role="tablist" aria-label="切換日期">
-			<button
-				type="button"
-				role="tab"
-				aria-selected={selectedDate === 'all'}
-				class="shrink-0 border px-3 py-1.5 font-mono text-xs font-bold transition {selectedDate ===
-				'all'
-					? 'border-black bg-[#d8ff36]'
-					: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
-				onclick={() => (selectedDate = 'all')}
-			>
-				全部
-			</button>
-			{#each dateTabs as date, i (date)}
+		<!-- Panel: desktop/tablet column, drawer on phones -->
+		{#if !phone.current}
+			<div class="min-w-0">
+				{@render panelContent()}
+			</div>
+		{/if}
+	</div>
+</main>
+
+{#if phone.current}
+	<Drawer.Root bind:open={drawerOpen}>
+		<Drawer.Content class="z-[1100] rounded-none border-t border-black/15 bg-white">
+			<Drawer.Header class="border-b border-black/10 py-3 text-left">
+				<Drawer.Title class="font-mono text-xs font-bold tracking-[0.18em] text-black/45"
+					>01 / 行程</Drawer.Title
+				>
+				<p class="text-lg font-black tracking-[-0.03em]">每日安排</p>
+			</Drawer.Header>
+			<div class="min-h-0 flex-1 overflow-y-auto px-4 pb-8 pt-4">
+				{@render panelContent()}
+			</div>
+		</Drawer.Content>
+	</Drawer.Root>
+{/if}
+
+{#snippet panelContent()}
+	<div class="min-w-0">
+		<!-- View toggle -->
+		<div class="flex gap-1">
+			{#each [{ value: 'list', label: '清單' }, { value: 'timeline', label: '時間表' }, { value: 'calendar', label: '月曆' }] as mode (mode.value)}
 				<button
 					type="button"
-					role="tab"
-					aria-selected={selectedDate === date}
-					class="shrink-0 border px-3 py-1.5 font-mono text-xs font-bold transition {selectedDate ===
-					date
-						? 'border-black bg-[#d8ff36]'
+					class="border px-3 py-1.5 font-mono text-xs font-bold transition {viewMode === mode.value
+						? 'border-black bg-[#151817] text-white'
 						: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
-					onclick={() => {
-						selectedDate = date
-						form.date = date
-					}}
+					onclick={() =>
+						mode.value === 'calendar'
+							? openCalendar()
+							: (viewMode = mode.value as 'list' | 'timeline')}
 				>
-					D{i + 1} · {date.slice(5)}
+					{mode.label}
 				</button>
 			{/each}
 		</div>
-	{/if}
 
-	<!-- Map -->
-	<div class="relative mt-3 h-64 w-full border border-black/10 sm:h-80">
-		<div bind:this={mapEl} class="absolute inset-0"></div>
-		{#if !mapInitialized}
-			<div class="absolute inset-0 z-[600] grid place-items-center bg-[#eef0eb]">
-				<span class="font-mono text-xs text-black/40">地圖載入中…</span>
+		<!-- Date tabs -->
+		{#if dateTabs.length > 0}
+			<div class="mt-3 flex gap-1 overflow-x-auto pb-1" role="tablist" aria-label="切換日期">
+				<button
+					type="button"
+					role="tab"
+					aria-selected={selectedDate === 'all'}
+					class="shrink-0 border px-3 py-1.5 font-mono text-xs font-bold transition {selectedDate ===
+					'all'
+						? 'border-black bg-[#d8ff36]'
+						: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
+					onclick={() => (selectedDate = 'all')}
+				>
+					全部
+				</button>
+				{#each dateTabs as date, i (date)}
+					<button
+						type="button"
+						role="tab"
+						aria-selected={selectedDate === date}
+						class="shrink-0 border px-3 py-1.5 font-mono text-xs font-bold transition {selectedDate ===
+						date
+							? 'border-black bg-[#d8ff36]'
+							: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
+						onclick={() => {
+							selectedDate = date
+							form.date = date
+						}}
+					>
+						D{i + 1} · {date.slice(5)}
+					</button>
+				{/each}
 			</div>
 		{/if}
-		<div
-			class="absolute bottom-3 left-3 z-[500] grid grid-cols-2 gap-x-3 gap-y-1 border border-black/15 bg-white/95 px-3 py-2 text-[10px] shadow-sm backdrop-blur"
-			aria-label="地圖路線圖例"
-		>
-			<span class="flex items-center gap-1.5"
-				><i class="w-5 border-t-2 border-dotted border-orange-600"></i>步行</span
-			>
-			<span class="flex items-center gap-1.5"
-				><i class="w-5 border-t-2 border-blue-600"></i>開車</span
-			>
-			<span class="flex items-center gap-1.5"
-				><i class="w-5 border-t-2 border-violet-600"></i>大眾運輸</span
-			>
-			<span class="flex items-center gap-1.5"
-				><i class="w-5 border-t-2 border-dashed border-cyan-700"></i>航班／船</span
-			>
-			<span class="col-span-2 flex items-center gap-1.5 text-black/50"
-				><i class="w-5 border-t-2 border-dashed border-gray-500"></i>無路線資料</span
-			>
-		</div>
-	</div>
-	<p class="mt-1.5 text-xs text-black/45">點擊地圖上的路線可查看該路段的處理方式。</p>
 
-	<!-- Items + Form -->
-	<div class="mt-8 grid gap-8 lg:grid-cols-[1fr_380px]">
 		<!-- Items list -->
-		<section>
+		<section class="mt-4">
 			{#if viewMode === 'timeline'}
 				<div class="border border-black/10 bg-white">
 					<div class="flex items-center justify-between border-b border-black/10 px-4 py-3">
 						<p class="font-mono text-xs font-bold text-[#779a00]">
 							{timelineDay || '尚無日期'} · 時間表
 						</p>
-						<p class="text-xs text-black/40">{timelineItems.length + allDayItems.length} 個行程</p>
+						<p class="text-xs text-black/40">
+							{timelineItems.length + allDayItems.length} 個行程
+						</p>
 					</div>
 					{#if allDayItems.length > 0}
 						<div class="border-b border-black/10 px-4 py-2">
@@ -1087,7 +1349,9 @@
 											</p>
 										{/each}
 										{#if dayItems.length > 2}
-											<p class="mt-0.5 text-[10px] text-black/40">+{dayItems.length - 2} 個行程</p>
+											<p class="mt-0.5 text-[10px] text-black/40">
+												+{dayItems.length - 2} 個行程
+											</p>
 										{/if}
 									</button>
 								{:else}
@@ -1131,105 +1395,115 @@
 								{#each day.items as item, itemIndex (item.id)}
 									{#if itemIndex > 0}
 										{@const previousItem = day.items[itemIndex - 1]}
-										{@const optionState = segmentOptions[segmentKey(previousItem, item)]}
-										<section
-											class="border border-black/10 bg-[#f7f8f4] p-3"
-											aria-label={`${previousItem.title} 到 ${item.title} 的交通方案`}
-										>
-											<div class="flex flex-wrap items-center justify-between gap-2">
-												<div class="min-w-0">
+										{@const segKey = segmentKey(previousItem, item)}
+										{@const summary = segmentSummary[summaryKey(previousItem, item)]}
+										{@const optionState = segmentOptions[segKey]}
+										{@const ModeIcon = modeIcon(item.transportMode ?? 'drive')}
+										<div>
+											<div class="flex items-center gap-2 text-black/55">
+												<ModeIcon class="size-3.5 shrink-0" />
+												<span class="font-mono text-[11px] font-bold">
+													{TRANSPORT_LABELS[item.transportMode ?? ''] ?? '開車'}
+													{#if summary?.loading}
+														· 查詢中…
+													{:else if summary?.minutes != null}
+														· {summary.minutes} 分
+													{/if}
+												</span>
+												<button
+													type="button"
+													class="ml-auto font-mono text-[10px] font-bold text-black/40 hover:text-black"
+													onclick={() => toggleSegment(previousItem, item)}
+												>
+													{expandedSegment === segKey ? '收合' : '其他方式'}
+												</button>
+											</div>
+											{#if expandedSegment === segKey}
+												<section
+													class="mt-2 border border-black/10 bg-[#f7f8f4] p-3"
+													aria-label={`${previousItem.title} 到 ${item.title} 的交通方案`}
+												>
 													<p class="truncate text-xs font-bold">
 														{previousItem.title} → {item.title}
 													</p>
-													<p class="mt-0.5 text-[10px] text-black/45">
-														到這裡的方式：{TRANSPORT_LABELS[item.transportMode ?? ''] ??
-															'未指定（預設開車）'}
-													</p>
-												</div>
-												<button
-													type="button"
-													disabled={optionState?.loading}
-													class="shrink-0 border border-black/20 bg-white px-2.5 py-1.5 font-mono text-[10px] font-bold hover:border-black disabled:opacity-50"
-													onclick={() => loadSegmentOptions(previousItem, item)}
-												>
-													{optionState?.loading
-														? '查詢中…'
-														: optionState?.loaded
-															? '重新查詢'
-															: '查詢交通方案'}
-												</button>
-											</div>
-											{#if optionState?.loaded}
-												{#if optionState.error}
-													<p class="mt-2 text-xs text-red-700">{optionState.error}</p>
-												{:else}
-													<div class="mt-2 grid gap-2 sm:grid-cols-3">
-														<div class="border-l-4 border-orange-600 bg-white px-2.5 py-2">
-															<p class="text-xs font-bold">步行</p>
-															<p class="mt-0.5 text-[10px] text-black/50">
-																{optionState.walk
-																	? `${optionState.walk.durationMinutes} 分 · ${optionState.walk.distanceKm} km`
-																	: '查無路線'}
-															</p>
-														</div>
-														<div class="border-l-4 border-blue-600 bg-white px-2.5 py-2">
-															<p class="text-xs font-bold">開車</p>
-															<p class="mt-0.5 text-[10px] text-black/50">
-																{optionState.drive
-																	? `${optionState.drive.durationMinutes} 分 · ${optionState.drive.distanceKm} km`
-																	: '查無路線'}
-															</p>
-														</div>
-														<div class="border-l-4 border-violet-600 bg-white px-2.5 py-2">
-															<p class="text-xs font-bold">大眾運輸</p>
-															{#if optionState.transit}
-																<p class="mt-0.5 text-[10px] text-black/50">
-																	{optionState.transit.durationMinutes
-																		? `${optionState.transit.durationMinutes} 分`
-																		: '有可用路線'}{optionState.transit.transfers != null
-																		? ` · 轉乘 ${optionState.transit.transfers} 次`
-																		: ''}
-																</p>
-																{#if optionState.transit.departureTime || optionState.transit.arrivalTime}
+													{#if optionState?.loading}
+														<p class="mt-2 font-mono text-[10px] text-black/45">查詢中…</p>
+													{/if}
+													{#if optionState?.loaded}
+														{#if optionState.error}
+															<p class="mt-2 text-xs text-red-700">{optionState.error}</p>
+														{:else}
+															<div class="mt-2 grid gap-2 sm:grid-cols-3">
+																<div class="border-l-4 border-orange-600 bg-white px-2.5 py-2">
+																	<p class="text-xs font-bold">步行</p>
 																	<p class="mt-0.5 text-[10px] text-black/50">
-																		{formatClock(optionState.transit.departureTime)}–{formatClock(
-																			optionState.transit.arrivalTime
-																		)}
+																		{optionState.walk
+																			? `${optionState.walk.durationMinutes} 分 · ${optionState.walk.distanceKm} km`
+																			: '查無路線'}
 																	</p>
-																{/if}
-																{#if optionState.transit.services.length > 0}
-																	<p
-																		class="mt-0.5 break-words text-[10px] leading-4 font-bold text-violet-700"
-																	>
-																		搭乘：{optionState.transit.services.join(' → ')}
+																</div>
+																<div class="border-l-4 border-blue-600 bg-white px-2.5 py-2">
+																	<p class="text-xs font-bold">開車</p>
+																	<p class="mt-0.5 text-[10px] text-black/50">
+																		{optionState.drive
+																			? `${optionState.drive.durationMinutes} 分 · ${optionState.drive.distanceKm} km`
+																			: '查無路線'}
 																	</p>
-																{/if}
-																{#if optionState.transit.fares.length > 0}
-																	<p class="mt-1 text-[10px] font-bold text-black/70">
-																		預估票價：{optionState.transit.fares
-																			.map(formatFare)
-																			.join(' / ')}
-																	</p>
-																	<p class="mt-0.5 text-[9px] text-black/35">
-																		成人／預設票種；實際金額以營運單位為準
-																	</p>
-																{:else}
-																	<p class="mt-1 text-[10px] text-black/40">票價：資料來源未提供</p>
-																{/if}
-																<p class="mt-1 text-[9px] text-black/35">
-																	來源：{optionState.transit.source}
-																</p>
-															{:else}
-																<p class="mt-0.5 text-[10px] text-black/50">查無路線</p>
-															{/if}
-														</div>
-													</div>
-													<p class="mt-2 text-[10px] text-black/40">
-														步行與開車為一般路網估時；大眾運輸班次與即時性依資料來源涵蓋範圍為準。
-													</p>
-												{/if}
+																</div>
+																<div class="border-l-4 border-violet-600 bg-white px-2.5 py-2">
+																	<p class="text-xs font-bold">大眾運輸</p>
+																	{#if optionState.transit}
+																		<p class="mt-0.5 text-[10px] text-black/50">
+																			{optionState.transit.durationMinutes
+																				? `${optionState.transit.durationMinutes} 分`
+																				: '有可用路線'}{optionState.transit.transfers != null
+																				? ` · 轉乘 ${optionState.transit.transfers} 次`
+																				: ''}
+																		</p>
+																		{#if optionState.transit.departureTime || optionState.transit.arrivalTime}
+																			<p class="mt-0.5 text-[10px] text-black/50">
+																				{formatClock(
+																					optionState.transit.departureTime
+																				)}–{formatClock(optionState.transit.arrivalTime)}
+																			</p>
+																		{/if}
+																		{#if optionState.transit.services.length > 0}
+																			<p
+																				class="mt-0.5 break-words text-[10px] leading-4 font-bold text-violet-700"
+																			>
+																				搭乘：{optionState.transit.services.join(' → ')}
+																			</p>
+																		{/if}
+																		{#if optionState.transit.fares.length > 0}
+																			<p class="mt-1 text-[10px] font-bold text-black/70">
+																				預估票價：{optionState.transit.fares
+																					.map(formatFare)
+																					.join(' / ')}
+																			</p>
+																			<p class="mt-0.5 text-[9px] text-black/35">
+																				成人／預設票種；實際金額以營運單位為準
+																			</p>
+																		{:else}
+																			<p class="mt-1 text-[10px] text-black/40">
+																				票價：資料來源未提供
+																			</p>
+																		{/if}
+																		<p class="mt-1 text-[9px] text-black/35">
+																			來源：{optionState.transit.source}
+																		</p>
+																	{:else}
+																		<p class="mt-0.5 text-[10px] text-black/50">查無路線</p>
+																	{/if}
+																</div>
+															</div>
+															<p class="mt-2 text-[10px] text-black/40">
+																步行與開車為一般路網估時；大眾運輸班次與即時性依資料來源涵蓋範圍為準。
+															</p>
+														{/if}
+													{/if}
+												</section>
 											{/if}
-										</section>
+										</div>
 									{/if}
 									{#if editingId === item.id}
 										<article class="grid gap-3 border border-black bg-white p-4">
@@ -1398,17 +1672,25 @@
 												? 'border-[#779a00] ring-1 ring-[#779a00]'
 												: 'border-black/10'}"
 										>
-											<div class="w-24 shrink-0 border-r border-black/10 pr-4">
-												<p class="font-mono text-xs font-bold text-[#779a00]">{item.date}</p>
-												<p class="mt-2 text-sm text-black/50">{item.startTime || '全天'}</p>
-												{#if item.transportMode}
-													<p class="mt-1 text-[10px] font-bold text-black/40">
-														{TRANSPORT_LABELS[item.transportMode] ?? item.transportMode}
-													</p>
-												{/if}
-											</div>
+											<button
+												type="button"
+												title="在地圖上顯示"
+												disabled={!item.place || item.place.lat === null || item.place.lng === null}
+												class="grid size-7 shrink-0 place-items-center font-mono text-xs font-black transition disabled:opacity-40 {highlightedItemId ===
+												item.id
+													? 'bg-[#d8ff36] text-black ring-1 ring-black'
+													: 'bg-[#151817] text-white hover:bg-black'}"
+												onclick={() => focusItemOnMap(item)}
+											>
+												{itemNumbers[item.id] ?? '·'}
+											</button>
 											<div class="min-w-0 flex-1">
-												<h3 class="font-bold">
+												<p class="font-mono text-[11px] font-bold text-[#779a00]">
+													{item.startTime
+														? `${item.startTime}${item.endTime ? `–${item.endTime}` : ''}`
+														: '全天'}
+												</p>
+												<h3 class="mt-0.5 font-bold">
 													<!-- eslint-disable svelte/no-navigation-without-resolve -->
 													<a
 														href={`/trips/${data.trip.id}/itinerary/${item.id}`}
@@ -1467,21 +1749,8 @@
 														</div>
 													</div>
 												{/if}
-												{#if item.endTime}
-													<p class="mt-2 text-xs text-black/40">結束於 {item.endTime}</p>
-												{/if}
 											</div>
 											<div class="flex shrink-0 gap-1">
-												{#if item.place && item.place.lat !== null && item.place.lng !== null}
-													<button
-														type="button"
-														title="在地圖上顯示"
-														class="text-black/35 hover:text-[#779a00]"
-														onclick={() => focusItemOnMap(item)}
-													>
-														<Crosshair class="size-4" />
-													</button>
-												{/if}
 												{#if !readonly}
 													{#if tidy}
 														<ActionMenu
@@ -1668,6 +1937,48 @@
 						</div>
 					{/if}
 				</div>
+				{#if insertSlots.length > 0}
+					<div class="grid gap-2 border border-black/10 bg-[#f7f8f4] p-3">
+						<p class="font-mono text-xs font-bold tracking-widest text-black/60">要加在哪？</p>
+						{#each insertSlots as slot (slot.index)}
+							<button
+								type="button"
+								class="grid gap-1 border p-2.5 text-left transition {insertChoice === slot.index
+									? 'border-black bg-white'
+									: 'border-black/10 bg-white/60 hover:border-black/40'}"
+								onclick={() => pickSlot(slot)}
+							>
+								<span class="flex flex-wrap items-center gap-1 text-xs">
+									<span class="truncate text-black/50">{slot.prev?.title ?? '當天開始'}</span>
+									<span class="text-black/30">→</span>
+									<span class="font-bold">{formPlace?.name}</span>
+									<span class="text-black/30">→</span>
+									<span class="truncate text-black/50">{slot.next?.title ?? '當天結束'}</span>
+								</span>
+								<span class="flex items-center gap-2">
+									{#if slot.best}
+										<span class="bg-[#d8ff36] px-1.5 py-0.5 font-mono text-[10px] font-bold"
+											>加在這裡最順</span
+										>
+									{/if}
+									{#if slot.detourKm !== null}
+										<span class="font-mono text-[10px] text-black/40"
+											>繞路約 {Math.round(slot.detourKm * 10) / 10} km</span
+										>
+									{/if}
+									{#if slot.suggestedTime}
+										<span class="font-mono text-[10px] text-black/40"
+											>建議 {slot.suggestedTime}</span
+										>
+									{/if}
+								</span>
+							</button>
+						{/each}
+						<p class="text-[10px] text-black/40">
+							依直線距離估算最順的插入位置；選擇後會自動帶入建議時間，可再調整。
+						</p>
+					</div>
+				{/if}
 				<label class="grid gap-2 text-sm font-bold"
 					>備註<Textarea
 						bind:value={form.notes}
@@ -1684,4 +1995,4 @@
 			</form>
 		{/if}
 	</div>
-</main>
+{/snippet}
