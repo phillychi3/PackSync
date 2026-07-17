@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { Bot, MessageCircle, Plus, Send, Trash2 } from '@lucide/svelte'
 	import { onMount } from 'svelte'
+	import { MediaQuery } from 'svelte/reactivity'
 	import Markdown from 'svelte-exmarkdown'
 	import { gfmPlugin } from 'svelte-exmarkdown/gfm'
 	import { Button } from '$lib/components/ui/button'
+	import * as Drawer from '$lib/components/ui/drawer'
 	import { Textarea } from '$lib/components/ui/textarea'
 	import { confirmDialog } from '$lib/stores/confirm'
 	import { toast } from '$lib/stores/toast'
@@ -36,7 +38,17 @@
 	let sending = $state(false)
 	let deciding = $state(false)
 	let errorMessage = $state('')
+	let messagesEl: HTMLDivElement | undefined
+	const phone = new MediaQuery('(max-width: 639px)')
+	let sidebarOpen = $state(false)
 	const markdownPlugins = [gfmPlugin()]
+
+	$effect(() => {
+		void messages.length
+		void sending
+		const el = messagesEl
+		if (el) requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight }))
+	})
 
 	const STATUS_LABELS: Record<AgentAction['status'], string> = {
 		proposed: '待確認',
@@ -88,6 +100,7 @@
 
 	async function selectConversation(id: string) {
 		selectedId = id
+		if (phone.current) sidebarOpen = false
 		const response = await offlineFetch(`/api/trips/${data.trip.id}/agent/${id}`)
 		if (response.ok) {
 			const payload = await response.json()
@@ -107,6 +120,7 @@
 			conversations = [conversation, ...conversations]
 			messages = []
 			selectedId = conversation.id
+			if (phone.current) sidebarOpen = false
 			return conversation.id as string
 		}
 		return ''
@@ -168,64 +182,36 @@
 <svelte:head><title>Travel AI Agent | {data.trip.name}</title></svelte:head>
 
 <main
-	class="mx-auto grid min-h-[calc(100vh-150px)] w-full max-w-7xl gap-6 px-5 py-8 sm:px-8 lg:grid-cols-[280px_1fr] lg:py-12"
+	class="mx-auto grid w-full max-w-7xl max-sm:gap-0 max-sm:px-0 max-sm:py-0 sm:min-h-[calc(100vh-150px)] sm:gap-6 sm:px-8 sm:py-8 lg:grid-cols-[280px_1fr] lg:py-12"
 >
-	<aside class="border border-black/10 bg-white p-5">
-		<div class="flex items-center justify-between border-b border-black/10 pb-5">
-			<div>
-				<p class="font-mono text-xs font-bold tracking-widest text-black/45">TRAVEL AI</p>
-				<h2 class="mt-2 text-2xl font-black">對話紀錄</h2>
-			</div>
-			<Button
-				type="button"
-				size="icon"
-				class="rounded-none bg-[#d8ff36] text-black hover:bg-[#c8ef28]"
-				onclick={createConversation}
-				title="新增對話"><Plus class="size-4" /></Button
-			>
-		</div>
-		<div class="mt-5 grid gap-1">
-			{#each conversations as conversation (conversation.id)}
-				<div
-					class="flex items-center border text-sm {selectedId === conversation.id
-						? 'border-black bg-[#f4f5f2] font-bold'
-						: 'border-transparent text-black/60 hover:bg-[#f4f5f2]'}"
-				>
-					<button
-						type="button"
-						class="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left"
-						onclick={() => selectConversation(conversation.id)}
-					>
-						<MessageCircle class="size-4 shrink-0" /><span class="truncate"
-							>{conversation.title}</span
-						>
-					</button>
-					<button
-						type="button"
-						class="mr-2 rounded p-2 text-black/35 hover:bg-white hover:text-red-600"
-						onclick={() => deleteConversation(conversation.id)}
-						aria-label="刪除對話"
-						title="刪除對話"
-					>
-						<Trash2 class="size-4" />
-					</button>
-				</div>
-			{/each}
-			{#if !loading && conversations.length === 0}<p class="p-3 text-sm text-black/45">
-					尚無對話，開始詢問旅程吧。
-				</p>{/if}
-		</div>
-	</aside>
+	{#if !phone.current}
+		<aside class="min-w-0 border border-black/10 bg-white p-5">
+			{@render conversationPanel()}
+		</aside>
+	{/if}
 
-	<section class="flex min-h-[620px] flex-col border border-black/10 bg-white">
-		<div class="flex items-center gap-3 border-b border-black/10 p-5 sm:p-7">
-			<div class="grid size-10 place-items-center bg-[#d8ff36]"><Bot class="size-5" /></div>
-			<div>
-				<h1 class="text-xl font-black">Travel AI Agent</h1>
-				<p class="text-sm text-black/50">詢問行程、地點、費用與待辦事項</p>
+	<section
+		class="flex min-w-0 flex-col border border-black/10 bg-white max-sm:h-[calc(100dvh-10rem)] max-sm:border-x-0 sm:h-[calc(100dvh-16rem)] sm:min-h-120"
+	>
+		<div class="flex items-center gap-3 border-b border-black/10 p-4 sm:p-7">
+			<div class="grid size-10 shrink-0 place-items-center bg-[#d8ff36]">
+				<Bot class="size-5" />
 			</div>
+			<div class="min-w-0">
+				<h1 class="text-xl font-black">Travel AI Agent</h1>
+				<p class="truncate text-sm text-black/50">詢問行程、地點、費用與待辦事項</p>
+			</div>
+			{#if phone.current}
+				<button
+					type="button"
+					class="ml-auto flex shrink-0 items-center gap-1.5 border border-black/15 px-3 py-2 text-xs font-bold text-black/60 hover:border-black hover:text-black"
+					onclick={() => (sidebarOpen = true)}
+				>
+					<MessageCircle class="size-4" /> 紀錄
+				</button>
+			{/if}
 		</div>
-		<div class="flex-1 space-y-4 overflow-y-auto p-5 sm:p-7">
+		<div bind:this={messagesEl} class="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 sm:p-7">
 			{#if messages.length === 0}<div
 					class="grid h-full min-h-80 place-items-center text-center text-black/45"
 				>
@@ -237,18 +223,19 @@
 			{#each messages as message (message.id)}
 				<div class="flex {message.role === 'user' ? 'justify-end' : 'justify-start'}">
 					<div
-						class="max-w-[85%] border px-4 py-3 text-sm leading-6 {message.role === 'user'
+						class="min-w-0 max-w-[85%] break-words border px-4 py-3 text-sm leading-6 {message.role ===
+						'user'
 							? 'border-black bg-black text-white'
 							: 'border-black/10 bg-[#f4f5f2]'}"
 					>
 						{#if message.role === 'assistant'}
 							<div
-								class="prose prose-sm max-w-none prose-headings:my-2 prose-p:my-1 prose-pre:my-3 prose-a:text-[#557000]"
+								class="prose prose-sm max-w-none prose-headings:my-2 prose-p:my-1 prose-pre:my-3 prose-pre:max-w-full prose-pre:overflow-x-auto prose-a:text-[#557000]"
 							>
 								<Markdown md={message.content} plugins={markdownPlugins} />
 							</div>
 						{:else}
-							<div class="whitespace-pre-wrap">{message.content}</div>
+							<div class="whitespace-pre-wrap break-words">{message.content}</div>
 						{/if}
 					</div>
 				</div>
@@ -256,7 +243,7 @@
 					{#each messageActions(message.id) as action (action.id)}
 						<div class="flex justify-start">
 							<div
-								class="w-full max-w-[85%] border px-4 py-3 {action.status === 'proposed'
+								class="w-full min-w-0 max-w-[85%] border px-4 py-3 {action.status === 'proposed'
 									? 'border-[#779a00] bg-[#fbffe8]'
 									: 'border-black/10 bg-white'}"
 							>
@@ -314,13 +301,13 @@
 					{errorMessage}
 				</p>{/if}
 		</div>
-		<form class="border-t border-black/10 p-5 sm:p-7" onsubmit={sendMessage}>
+		<form class="border-t border-black/10 p-4 sm:p-7" onsubmit={sendMessage}>
 			<div class="flex items-end gap-3">
 				<Textarea
 					bind:value={input}
 					rows={2}
 					placeholder="輸入你的問題…"
-					class="resize-none rounded-none border-black/20 bg-[#fbfcf8]"
+					class="min-w-0 flex-1 resize-none rounded-none border-black/20 bg-[#fbfcf8]"
 					disabled={sending}
 				/><Button
 					type="submit"
@@ -331,3 +318,60 @@
 		</form>
 	</section>
 </main>
+
+{#if phone.current}
+	<Drawer.Root bind:open={sidebarOpen} direction="left">
+		<Drawer.Content class="z-[1100] rounded-none border-r border-black/15 bg-white">
+			<Drawer.Title class="sr-only">對話紀錄</Drawer.Title>
+			<div class="min-h-0 flex-1 overflow-y-auto p-5">
+				{@render conversationPanel()}
+			</div>
+		</Drawer.Content>
+	</Drawer.Root>
+{/if}
+
+{#snippet conversationPanel()}
+	<div class="flex items-center justify-between border-b border-black/10 pb-5">
+		<div>
+			<p class="font-mono text-xs font-bold tracking-widest text-black/45">TRAVEL AI</p>
+			<h2 class="mt-2 text-2xl font-black">對話紀錄</h2>
+		</div>
+		<Button
+			type="button"
+			size="icon"
+			class="rounded-none bg-[#d8ff36] text-black hover:bg-[#c8ef28]"
+			onclick={createConversation}
+			title="新增對話"><Plus class="size-4" /></Button
+		>
+	</div>
+	<div class="mt-5 grid gap-1">
+		{#each conversations as conversation (conversation.id)}
+			<div
+				class="flex items-center border text-sm {selectedId === conversation.id
+					? 'border-black bg-[#f4f5f2] font-bold'
+					: 'border-transparent text-black/60 hover:bg-[#f4f5f2]'}"
+			>
+				<button
+					type="button"
+					class="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left"
+					onclick={() => selectConversation(conversation.id)}
+				>
+					<MessageCircle class="size-4 shrink-0" /><span class="truncate">{conversation.title}</span
+					>
+				</button>
+				<button
+					type="button"
+					class="mr-2 rounded p-2 text-black/35 hover:bg-white hover:text-red-600"
+					onclick={() => deleteConversation(conversation.id)}
+					aria-label="刪除對話"
+					title="刪除對話"
+				>
+					<Trash2 class="size-4" />
+				</button>
+			</div>
+		{/each}
+		{#if !loading && conversations.length === 0}<p class="p-3 text-sm text-black/45">
+				尚無對話，開始詢問旅程吧。
+			</p>{/if}
+	</div>
+{/snippet}

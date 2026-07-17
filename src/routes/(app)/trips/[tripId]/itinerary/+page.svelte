@@ -1103,7 +1103,7 @@
 		<!-- Map column -->
 		<div class="lg:sticky lg:top-6">
 			<div
-				class="relative w-full border border-black/10 max-sm:h-[calc(100dvh-12rem)] max-sm:border-x-0 sm:h-96 lg:h-[calc(100vh-8rem)]"
+				class="relative w-full border border-black/10 max-sm:h-[calc(100dvh-10rem)] max-sm:border-x-0 sm:h-96 lg:h-[calc(100vh-8rem)]"
 			>
 				<div bind:this={mapEl} class="absolute inset-0"></div>
 				{#if !mapInitialized}
