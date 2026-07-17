@@ -151,7 +151,6 @@
 	{/if}
 
 	{#if data.trip.status === 'ongoing'}
-		<!-- 旅途中模式：行動優先 -->
 		<section class="border-b border-black/15 pb-8">
 			<div class="flex flex-wrap items-center justify-between gap-3">
 				<p class="font-mono text-xs font-bold tracking-[0.18em] text-black/45">
@@ -180,7 +179,6 @@
 			</div>
 			<h2 class="mt-3 text-3xl font-black tracking-[-0.05em] sm:text-4xl">現在最重要的事。</h2>
 			<div class="mt-6 grid gap-4 sm:grid-cols-3">
-				<!-- eslint-disable svelte/no-navigation-without-resolve -->
 				<a
 					href={route(`${base}/itinerary`)}
 					class="border border-black bg-white p-5 transition hover:bg-[#fbffe8]"
@@ -238,7 +236,6 @@
 							: '目前的分帳都已結清。'}
 					</p>
 				</a>
-				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			</div>
 		</section>
 	{:else}
@@ -288,10 +285,9 @@
 				class="rounded-none border-black/10 bg-white shadow-none transition hover:border-black/35"
 			>
 				<CardContent class="p-5">
-					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 					<a href={route(card.href)} class="block">
 						<div class="flex items-start justify-between">
-							<span class="grid size-10 place-items-center bg-[#d8ff36]"
+							<span class="grid size-10 place-items-center bg-[#d8ff36] text-black"
 								><Icon class="size-5" /></span
 							><span class="font-mono text-3xl font-black">{card.value}</span>
 						</div>

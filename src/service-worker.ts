@@ -9,8 +9,6 @@ declare const self: ServiceWorkerGlobalScope & {
 precacheAndRoute(self.__WB_MANIFEST)
 cleanupOutdatedCaches()
 
-// ─── Offline outbox：離線時暫存修改／刪除，恢復連線後重送 ─────────────────────
-
 type OutboxEntry = {
 	id?: number
 	url: string
@@ -18,7 +16,6 @@ type OutboxEntry = {
 	contentType: string
 	body: string
 	ts: number
-	// POST 重送時帶上，伺服器以此防止重複建立
 	idempotencyKey?: string
 }
 
@@ -145,9 +142,6 @@ self.addEventListener('fetch', (event) => {
 		return
 	}
 
-	// SvelteKit client-side navigations fetch route data from `__data.json` instead of
-	// issuing a document navigation. Cache those responses too, otherwise clicking a
-	// trip while offline bypasses this handler and SvelteKit renders its 500 page.
 	const isSvelteKitData =
 		url.origin === self.location.origin && url.pathname.endsWith('/__data.json')
 	const isStaticAsset =
@@ -181,9 +175,6 @@ self.addEventListener('fetch', (event) => {
 					return response
 				}
 
-				// DevTools Offline and some development proxies resolve fetches with a
-				// 5xx response instead of rejecting. Treat that as a network failure when
-				// a previously successful response is available.
 				return (await matchCached()) ?? response
 			} catch {
 				const cached = await matchCached()

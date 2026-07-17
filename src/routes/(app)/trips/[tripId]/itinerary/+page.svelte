@@ -122,7 +122,6 @@
 	let saving = $state(false)
 	let placeDetails = $state({ openingHours: '', rating: '', ratingCount: '' })
 
-	// Place search state
 	let newPlace = $state({
 		show: false,
 		forEdit: false,
@@ -132,7 +131,6 @@
 	})
 	let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-	// Map
 	let mapEl: HTMLDivElement
 	let mapInitialized = $state(false)
 	let L: typeof LType | null = null
@@ -205,7 +203,6 @@
 		return numbers
 	})
 
-	// Timeline view
 	const HOUR_PX = 56
 	const timelineDay = $derived(selectedDate === 'all' ? (dateTabs[0] ?? '') : selectedDate)
 	const timelineItems = $derived(
@@ -238,7 +235,6 @@
 		return `top:${top}px;height:${height}px`
 	}
 
-	// Calendar view
 	let calendarMonth = $state('')
 
 	const itemsByDate = $derived.by(() => {
@@ -366,8 +362,6 @@
 		}
 	})
 
-	// Real route geometry: OSRM (FOSSGIS) for walk/drive, Transitous (MOTIS) for transit;
-	// falls back to a dashed straight line for flight/boat, uncovered regions, or on failure
 	type RouteSegment = {
 		from: [number, number]
 		to: [number, number]
@@ -463,9 +457,7 @@
 				`${CACHE_PREFIX}${key}`,
 				JSON.stringify({ value, expiresAt: Date.now() + ttl })
 			)
-		} catch {
-			// Storage may be full or disabled; the in-memory cache still works.
-		}
+		} catch {}
 	}
 
 	function routeProfile(mode: string | null): 'car' | 'foot' | null {
@@ -528,7 +520,6 @@
 		to: [number, number],
 		profile: 'car' | 'foot'
 	): Promise<RoadRoute | null> {
-		// Long segments (flights, ferries) don't have road routes
 		if (Math.abs(from[0] - to[0]) + Math.abs(from[1] - to[1]) > 3) return null
 		const key = `${profile}:${coordinateKey(from, to)}`
 		if (routeCache[key]) return routeCache[key]
@@ -672,7 +663,6 @@
 		}
 	}
 
-	// Compact auto-loaded duration shown between consecutive stops in the panel
 	type SegmentSummary = { loading: boolean; minutes: number | null }
 	let segmentSummary = $state<Record<string, SegmentSummary>>({})
 	const summaryRequested: Record<string, true> = {}
@@ -760,7 +750,6 @@
 		if (!form.date && data.trip.startDate) form.date = data.trip.startDate
 	})
 
-	// Insertion suggestion: where in the day the new place fits with the least detour
 	type InsertSlot = {
 		index: number
 		prev: Item | null
@@ -1054,7 +1043,6 @@
 			const mod = await import('leaflet')
 			L = mod as unknown as typeof LType
 
-			// Fix bundler icon paths（改用本地打包資源，離線也可用）
 			const icons = L.Icon.Default as unknown as { prototype: Record<string, unknown> }
 			delete icons.prototype['_getIconUrl']
 			L.Icon.Default.mergeOptions({
@@ -1083,17 +1071,14 @@
 </script>
 
 <main class="mx-auto w-full max-w-7xl max-sm:px-0 max-sm:py-0 sm:px-8 sm:py-8 lg:py-12">
-	<!-- Header -->
 	<div class="border-b border-black/15 pb-6 max-sm:hidden">
 		<p class="font-mono text-xs font-bold tracking-[0.18em] text-black/45">01 / 行程</p>
 		<h2 class="mt-3 text-4xl font-black tracking-[-0.05em]">每日安排</h2>
 	</div>
 
-	<!-- Map + Panel -->
 	<div
 		class="grid gap-6 max-sm:mt-0 max-sm:gap-0 sm:mt-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start"
 	>
-		<!-- Map column -->
 		<div class="lg:sticky lg:top-6">
 			<div
 				class="relative w-full border border-black/10 max-sm:h-[calc(100dvh-9rem)] max-sm:border-x-0 sm:h-96 lg:h-[calc(100vh-8rem)]"
@@ -1105,7 +1090,7 @@
 					</div>
 				{/if}
 				<div
-					class="absolute bottom-3 left-3 z-[500] grid grid-cols-2 gap-x-3 gap-y-1 border border-black/15 bg-white/95 px-3 py-2 text-[10px] shadow-sm backdrop-blur"
+					class="absolute bottom-3 left-3 z-[500] grid grid-cols-2 gap-x-3 gap-y-1 border border-black/15 bg-white/95 px-3 py-2 text-[10px] shadow-sm backdrop-blur dark:border-white/15 dark:bg-card/95 dark:text-foreground"
 					aria-label="地圖路線圖例"
 				>
 					<span class="flex items-center gap-1.5"
@@ -1141,7 +1126,6 @@
 			</p>
 		</div>
 
-		<!-- Panel: desktop/tablet column, drawer on phones -->
 		{#if !phone.current}
 			<div class="min-w-0">
 				{@render panelContent()}
@@ -1168,14 +1152,13 @@
 
 {#snippet panelContent()}
 	<div class="min-w-0">
-		<!-- View toggle -->
 		<div class="flex gap-1">
 			{#each [{ value: 'list', label: '清單' }, { value: 'timeline', label: '時間表' }, { value: 'calendar', label: '月曆' }] as mode (mode.value)}
 				<button
 					type="button"
 					class="border px-3 py-1.5 font-mono text-xs font-bold transition {viewMode === mode.value
 						? 'border-black bg-[#151817] text-white'
-						: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
+						: 'border-black/15 bg-white text-black/55 hover:border-black/40 dark:border-white/15 dark:bg-card dark:text-white/55 dark:hover:border-white/40'}"
 					onclick={() =>
 						mode.value === 'calendar'
 							? openCalendar()
@@ -1186,7 +1169,6 @@
 			{/each}
 		</div>
 
-		<!-- Date tabs -->
 		{#if dateTabs.length > 0}
 			<div class="mt-3 flex gap-1 overflow-x-auto pb-1" role="tablist" aria-label="切換日期">
 				<button
@@ -1195,8 +1177,8 @@
 					aria-selected={selectedDate === 'all'}
 					class="shrink-0 border px-3 py-1.5 font-mono text-xs font-bold transition {selectedDate ===
 					'all'
-						? 'border-black bg-[#d8ff36]'
-						: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
+						? 'border-black bg-[#d8ff36] text-black'
+						: 'border-black/15 bg-white text-black/55 hover:border-black/40 dark:border-white/15 dark:bg-card dark:text-white/55 dark:hover:border-white/40'}"
 					onclick={() => (selectedDate = 'all')}
 				>
 					全部
@@ -1208,8 +1190,8 @@
 						aria-selected={selectedDate === date}
 						class="shrink-0 border px-3 py-1.5 font-mono text-xs font-bold transition {selectedDate ===
 						date
-							? 'border-black bg-[#d8ff36]'
-							: 'border-black/15 bg-white text-black/55 hover:border-black/40'}"
+							? 'border-black bg-[#d8ff36] text-black'
+							: 'border-black/15 bg-white text-black/55 hover:border-black/40 dark:border-white/15 dark:bg-card dark:text-white/55 dark:hover:border-white/40'}"
 						onclick={() => {
 							selectedDate = date
 							form.date = date
@@ -1221,7 +1203,6 @@
 			</div>
 		{/if}
 
-		<!-- Items list -->
 		<section class="mt-4">
 			{#if viewMode === 'timeline'}
 				<div class="border border-black/10 bg-white">
@@ -1292,7 +1273,7 @@
 					<div class="flex items-center justify-between border-b border-black/10 px-4 py-3">
 						<button
 							type="button"
-							class="grid size-8 place-items-center border border-black/15 hover:border-black"
+							class="grid size-8 place-items-center border border-black/15 hover:border-black dark:border-white/20 dark:bg-muted dark:text-white dark:hover:border-white/50"
 							aria-label="上一個月"
 							onclick={() => shiftMonth(-1)}
 						>
@@ -1301,7 +1282,7 @@
 						<p class="font-mono text-sm font-black">{calendarMonth}</p>
 						<button
 							type="button"
-							class="grid size-8 place-items-center border border-black/15 hover:border-black"
+							class="grid size-8 place-items-center border border-black/15 hover:border-black dark:border-white/20 dark:bg-muted dark:text-white dark:hover:border-white/50"
 							aria-label="下一個月"
 							onclick={() => shiftMonth(1)}
 						>
@@ -1310,7 +1291,9 @@
 					</div>
 					<div class="grid grid-cols-7 border-b border-black/10">
 						{#each ['日', '一', '二', '三', '四', '五', '六'] as weekday (weekday)}
-							<p class="py-2 text-center font-mono text-[10px] font-bold text-black/40">
+							<p
+								class="py-2 text-center font-mono text-[10px] font-bold text-black/40 dark:text-white/55"
+							>
 								{weekday}
 							</p>
 						{/each}
@@ -1331,8 +1314,8 @@
 									>
 										<span
 											class="inline-grid size-5 place-items-center font-mono text-[10px] font-bold {inTrip
-												? 'bg-[#d8ff36]'
-												: 'text-black/40'}"
+												? 'bg-[#d8ff36] text-black'
+												: 'text-black/40 dark:text-white/45'}"
 										>
 											{Number(day.slice(8, 10))}
 										</span>
@@ -1373,7 +1356,7 @@
 						<div class="mb-6 last:mb-0">
 							<div class="mb-3 flex items-center gap-3">
 								<span
-									class="grid size-8 place-items-center bg-[#d8ff36] font-mono text-xs font-black"
+									class="grid size-8 place-items-center bg-[#d8ff36] font-mono text-xs font-black text-black"
 								>
 									{day.date.slice(8, 10)}
 								</span>
@@ -1546,7 +1529,6 @@
 													class="rounded-none border-black/20 bg-[#fbfcf8]"
 												/></label
 											>
-											<!-- Place picker (edit) -->
 											<div class="grid gap-1.5">
 												<label for="edit-place" class="text-xs font-bold">地點</label>
 												<div class="flex gap-2">
@@ -1669,10 +1651,10 @@
 												type="button"
 												title="在地圖上顯示"
 												disabled={!item.place || item.place.lat === null || item.place.lng === null}
-												class="grid size-7 shrink-0 place-items-center font-mono text-xs font-black transition disabled:opacity-40 {highlightedItemId ===
+												class="grid size-7 shrink-0 place-items-center border font-mono text-xs font-black transition disabled:opacity-40 {highlightedItemId ===
 												item.id
-													? 'bg-[#d8ff36] text-black ring-1 ring-black'
-													: 'bg-[#151817] text-white hover:bg-black'}"
+													? 'border-black bg-[#d8ff36] text-black ring-1 ring-black'
+													: 'border-black bg-[#151817] text-white hover:bg-black dark:border-white/30 dark:bg-muted dark:hover:bg-white/15'}"
 												onclick={() => focusItemOnMap(item)}
 											>
 												{itemNumbers[item.id] ?? '·'}
@@ -1684,12 +1666,10 @@
 														: '全天'}
 												</p>
 												<h3 class="mt-0.5 font-bold">
-													<!-- eslint-disable svelte/no-navigation-without-resolve -->
 													<a
 														href={`/trips/${data.trip.id}/itinerary/${item.id}`}
 														class="hover:text-[#779a00]">{item.title}</a
 													>
-													<!-- eslint-enable svelte/no-navigation-without-resolve -->
 												</h3>
 												{#if item.place}
 													<p class="mt-1 flex items-center gap-1 text-xs text-black/50">
@@ -1756,7 +1736,6 @@
 			{/if}
 		</section>
 
-		<!-- Add form -->
 		{#if readonly}
 			<div class="h-fit border border-black/10 bg-white p-5 text-sm leading-6 text-black/50">
 				這趟旅程已完成，行程保留為紀錄，無法再修改。
@@ -1807,7 +1786,6 @@
 						{/each}
 					</select></label
 				>
-				<!-- Place picker (add) -->
 				<div class="grid gap-2">
 					<label for="add-place" class="text-sm font-bold">地點</label>
 					<div class="flex gap-2">

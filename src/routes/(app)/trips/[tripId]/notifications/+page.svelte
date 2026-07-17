@@ -189,7 +189,6 @@
 				{#each notifications as item (item.key)}
 					{@const Icon = icons[item.type]}
 					{@const unread = !readKeys.includes(item.key)}
-					<!-- eslint-disable svelte/no-navigation-without-resolve -->
 					<a
 						href={item.url}
 						class="flex gap-4 border p-5 transition {unread
@@ -213,7 +212,6 @@
 							{#if item.date}<p class="mt-2 font-mono text-xs text-black/40">{item.date}</p>{/if}
 						</div>
 					</a>
-					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				{/each}
 			{/if}
 		</section>

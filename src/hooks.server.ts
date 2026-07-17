@@ -7,7 +7,6 @@ import { idempotencyKey } from '$lib/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { svelteKitHandler } from 'better-auth/svelte-kit'
 
-// 離線佇列重送的 POST 會帶 x-idempotency-key，重複的 key 直接略過避免建立重複資料
 const handleIdempotency: Handle = async ({ event, resolve }) => {
 	const key = event.request.headers.get('x-idempotency-key')
 	if (!key || event.request.method !== 'POST' || !event.url.pathname.startsWith('/api/')) {

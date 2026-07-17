@@ -96,7 +96,6 @@
 		return result
 	})
 
-	// Per-person totals derived from itemized participants
 	let itemizedPerPerson = $derived.by(() => {
 		const result: Record<string, number> = {}
 		for (const item of items) {
@@ -347,7 +346,6 @@
 
 		if (res.ok) {
 			toast.success(editingBillId ? '費用已更新' : '費用已儲存')
-			// eslint-disable-next-line svelte/no-navigation-without-resolve
 			await goto(`/trips/${data.trip.id}/expenses`)
 		} else {
 			message = '儲存失敗，請確認所有欄位。'
@@ -375,7 +373,6 @@
 		</div>
 	{:else}
 		<form class="mt-8 grid gap-4" onsubmit={submit}>
-			<!-- Stepper -->
 			<div class="grid grid-cols-4 gap-1">
 				{#each STEPS as label, index (label)}
 					{@const stepNumber = index + 1}
@@ -405,7 +402,6 @@
 			{/if}
 
 			{#if step === 1}
-				<!-- Section 1: Basic Info -->
 				<section class="border border-black/10 bg-white p-5 sm:p-8">
 					<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">
 						01 / 基本資訊
@@ -456,7 +452,6 @@
 			{/if}
 
 			{#if step === 2}
-				<!-- Section 2: Amount / Items -->
 				<section class="border border-black/10 bg-white p-5 sm:p-8">
 					<div class="mb-4 flex items-center justify-between">
 						<p class="font-mono text-[10px] font-bold tracking-widest text-black/40">02 / 金額</p>
@@ -504,7 +499,6 @@
 											<Trash2 class="size-4 text-black/40" />
 										</button>
 									</div>
-									<!-- Per-item participant selection -->
 									<div class="mt-2 flex flex-wrap gap-1.5">
 										{#each members as m (m.userId)}
 											<button
@@ -531,7 +525,6 @@
 							</button>
 						</div>
 
-						<!-- Itemized per-person summary -->
 						{#if itemsTotal > 0 && Object.keys(itemizedPerPerson).length > 0}
 							<div class="mt-4 border-t border-black/10 pt-4">
 								<p class="mb-2 font-mono text-[10px] font-bold tracking-widest text-black/40">
@@ -561,7 +554,6 @@
 			{/if}
 
 			{#if step === 3}
-				<!-- Section 3: Payers -->
 				<section class="border border-black/10 bg-white p-5 sm:p-8">
 					<p class="mb-1 font-mono text-[10px] font-bold tracking-widest text-black/40">
 						03 / 付款人
@@ -615,7 +607,6 @@
 			{/if}
 
 			{#if step === 4}
-				<!-- Sections 04 + 05: only shown when NOT using itemized mode -->
 				{#if !useItems}
 					<section class="border border-black/10 bg-white p-5 sm:p-8">
 						<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">
@@ -721,7 +712,6 @@
 					</section>
 				{/if}
 
-				<!-- 確認總覽 -->
 				<section class="border border-black/10 bg-white p-5 sm:p-8">
 					<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">確認</p>
 					<div class="grid gap-2 text-sm">
@@ -777,7 +767,6 @@
 				</section>
 			{/if}
 
-			<!-- Step navigation -->
 			<div class="flex justify-between gap-2">
 				{#if step > 1}
 					<Button

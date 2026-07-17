@@ -5,6 +5,18 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
 		<meta name="theme-color" content="#ff3e00" />
+		<script>
+			try {
+				const dark = localStorage.getItem('packsync-theme') === 'dark'
+				document.documentElement.classList.toggle('dark', dark)
+				document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+				document
+					.querySelector('meta[name="theme-color"]')
+					?.setAttribute('content', dark ? '#151817' : '#ff3e00')
+			} catch {
+				void 0
+			}
+		</script>
 		<link rel="icon" href="/favicon.ico" sizes="any" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />

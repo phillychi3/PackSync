@@ -282,7 +282,6 @@
 		</div>
 	</div>
 
-	<!-- Stats -->
 	<div class="mt-8 grid gap-3 sm:grid-cols-3">
 		<div class="border border-black/10 bg-white p-4">
 			<p class="font-mono text-[10px] font-bold tracking-widest text-black/40">總支出</p>
@@ -312,7 +311,6 @@
 		</div>
 	</div>
 
-	<!-- Statistics -->
 	<section class="mt-8 border border-black/10 bg-white p-5 sm:p-8">
 		<div
 			class="flex flex-col gap-4 border-b border-black/10 pb-5 sm:flex-row sm:items-end sm:justify-between"
@@ -421,7 +419,6 @@
 		</div>
 	</section>
 
-	<!-- Settlements -->
 	{#if pendingSettlements.length > 0}
 		<section class="mt-8">
 			<p class="mb-3 font-mono text-[10px] font-bold tracking-widest text-black/40">轉帳明細</p>
@@ -499,7 +496,6 @@
 		</section>
 	{/if}
 
-	<!-- Bills -->
 	<section class="mt-8">
 		{#if settlements.length > 0}
 			<p class="mb-3 font-mono text-[10px] font-bold tracking-widest text-black/40">費用紀錄</p>

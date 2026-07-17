@@ -70,7 +70,6 @@
 	async function addItem(event: SubmitEvent) {
 		event.preventDefault()
 		if (!itemName.trim() || !selectedList) return
-		// 支援「護照, 充電器、常備藥」一次輸入多個物品
 		const names = itemName
 			.split(/[,，、\n]/)
 			.map((name) => name.trim())

@@ -17,7 +17,7 @@
 		name: string
 		amount: number
 		notes: string | null
-		participants: string | null // JSON array of userIds
+		participants: string | null
 	}
 	type Bill = {
 		id: string
@@ -45,7 +45,6 @@
 		!!bill && bill.items.length > 0 && bill.items.some((i) => i.participants !== null)
 	)
 
-	// userId → display name built from payers + participants on the bill
 	let userNameMap = $derived.by((): Record<string, string> => {
 		if (!bill) return {}
 		const map: Record<string, string> = {}
@@ -140,7 +139,6 @@
 		</div>
 	{:else}
 		<article class="grid gap-4">
-			<!-- Header -->
 			<div class="border border-black/10 bg-white p-6 sm:p-8">
 				<div class="flex items-start justify-between gap-4">
 					<div>
@@ -171,7 +169,6 @@
 				{/if}
 			</div>
 
-			<!-- Items (if any) -->
 			{#if bill.items.length > 0}
 				<div class="border border-black/10 bg-white p-5 sm:p-8">
 					<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">消費明細</p>
@@ -206,7 +203,6 @@
 				</div>
 			{/if}
 
-			<!-- Payers -->
 			<div class="border border-black/10 bg-white p-5 sm:p-8">
 				<p class="mb-4 font-mono text-[10px] font-bold tracking-widest text-black/40">付款人</p>
 				<div class="grid gap-2">
@@ -227,7 +223,6 @@
 				</div>
 			</div>
 
-			<!-- Participants & Split -->
 			<div class="border border-black/10 bg-white p-5 sm:p-8">
 				<div class="mb-4 flex items-center justify-between">
 					<p class="font-mono text-[10px] font-bold tracking-widest text-black/40">分攤明細</p>
@@ -256,7 +251,6 @@
 				</div>
 			</div>
 
-			<!-- Actions -->
 			{#if data.trip.status !== 'completed'}
 				<div class="border border-black/10 bg-white p-5 sm:p-8">
 					<Button

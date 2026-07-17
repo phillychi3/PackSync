@@ -87,8 +87,6 @@
 			if (online) void warmOfflineCache()
 		})
 
-		// Write responses into Cache Storage directly so warming does not depend on
-		// whether the active service worker controls this particular tab yet.
 	})
 
 	function formatDate(value: string | null) {

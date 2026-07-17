@@ -5,6 +5,7 @@
 	import Toaster from '$lib/components/toaster.svelte'
 	import { isNetworkReachable } from '$lib/network'
 	import { toast } from '$lib/stores/toast'
+	import { initializeDarkMode } from '$lib/theme'
 	import { onMount } from 'svelte'
 
 	let { children } = $props()
@@ -12,6 +13,7 @@
 	let offlineSince = $state<string | null>(null)
 
 	onMount(() => {
+		initializeDarkMode()
 		if ('serviceWorker' in navigator) {
 			navigator.serviceWorker.register('/service-worker.js', { type: 'module' }).catch(() => {})
 		}

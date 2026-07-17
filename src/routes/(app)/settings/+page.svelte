@@ -1,18 +1,29 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation'
 	import { resolve } from '$app/paths'
-	import { ArrowLeft, UserRound } from '@lucide/svelte'
+	import { ArrowLeft, Moon, Sun, UserRound } from '@lucide/svelte'
 	import { Button } from '$lib/components/ui/button'
 	import { Input } from '$lib/components/ui/input'
+	import { Switch } from '$lib/components/ui/switch'
 	import { toast } from '$lib/stores/toast'
+	import { initializeDarkMode, setDarkMode } from '$lib/theme'
+	import { onMount, untrack } from 'svelte'
 	import type { PageData } from './$types'
 
 	let { data }: { data: PageData } = $props()
-	// svelte-ignore state_referenced_locally
-	let name = $state(data.user.name ?? '')
-	// svelte-ignore state_referenced_locally
-	let image = $state(data.user.image ?? '')
+	let name = $state(untrack(() => data.user.name ?? ''))
+	let image = $state(untrack(() => data.user.image ?? ''))
 	let saving = $state(false)
+	let darkMode = $state(false)
+
+	onMount(() => {
+		darkMode = initializeDarkMode()
+	})
+
+	function toggleDarkMode(enabled: boolean) {
+		darkMode = enabled
+		setDarkMode(enabled)
+	}
 
 	async function save(event: SubmitEvent) {
 		event.preventDefault()
@@ -40,7 +51,7 @@
 	<title>個人設定 | PackSync</title>
 </svelte:head>
 
-<main class="min-h-screen bg-[#f4f5f2] text-[#151817]">
+<main class="min-h-screen bg-[#f4f5f2] text-[#151817] dark:bg-background dark:text-foreground">
 	<section class="mx-auto w-full max-w-2xl px-5 py-8 sm:px-8 lg:py-12">
 		<a
 			href={resolve('/trips')}
@@ -48,13 +59,40 @@
 		>
 			<ArrowLeft class="size-3.5" /> 返回旅程
 		</a>
-		<header class="mt-4 border-b border-black/15 pb-6">
+		<header class="mt-4 border-b border-black/15 pb-6 dark:border-white/15">
 			<p class="font-mono text-xs font-bold tracking-[0.18em] text-black/45">PACKSYNC / 設定</p>
 			<h1 class="mt-3 text-4xl font-black tracking-[-0.045em]">個人設定</h1>
 			<p class="mt-3 text-black/55">設定你在旅程中顯示的暱稱與頭像。</p>
 		</header>
 
-		<form class="mt-8 grid gap-5 border border-black/10 bg-white p-6" onsubmit={save}>
+		<section class="mt-8 border border-black/10 bg-white p-6 dark:border-white/10 dark:bg-card">
+			<div class="flex items-center justify-between gap-5">
+				<div class="flex min-w-0 items-center gap-3">
+					<span class="grid size-10 shrink-0 place-items-center bg-[#eef0eb] dark:bg-muted">
+						{#if darkMode}
+							<Moon class="size-5" />
+						{:else}
+							<Sun class="size-5" />
+						{/if}
+					</span>
+					<div class="min-w-0">
+						<p class="font-bold">黑暗模式</p>
+						<p class="mt-1 text-xs text-black/50 dark:text-white/50">降低暗處使用時的畫面亮度</p>
+					</div>
+				</div>
+				<Switch
+					checked={darkMode}
+					onCheckedChange={toggleDarkMode}
+					aria-label="切換黑暗模式"
+					class="data-checked:bg-[#d8ff36]"
+				/>
+			</div>
+		</section>
+
+		<form
+			class="mt-5 grid gap-5 border border-black/10 bg-white p-6 dark:border-white/10 dark:bg-card"
+			onsubmit={save}
+		>
 			<div class="flex items-center gap-4">
 				{#if image.trim()}
 					<img

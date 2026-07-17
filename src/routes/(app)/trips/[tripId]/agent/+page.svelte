@@ -226,11 +226,11 @@
 						class="min-w-0 max-w-[85%] break-words border px-4 py-3 text-sm leading-6 {message.role ===
 						'user'
 							? 'border-black bg-black text-white'
-							: 'border-black/10 bg-[#f4f5f2]'}"
+							: 'border-black/10 bg-[#f4f5f2] dark:border-white/10 dark:bg-card'}"
 					>
 						{#if message.role === 'assistant'}
 							<div
-								class="prose prose-sm max-w-none prose-headings:my-2 prose-p:my-1 prose-pre:my-3 prose-pre:max-w-full prose-pre:overflow-x-auto prose-a:text-[#557000]"
+								class="prose prose-sm max-w-none prose-headings:my-2 prose-p:my-1 prose-pre:my-3 prose-pre:max-w-full prose-pre:overflow-x-auto prose-a:text-[#557000] dark:prose-invert dark:prose-a:text-[#d8ff36]"
 							>
 								<Markdown md={message.content} plugins={markdownPlugins} />
 							</div>

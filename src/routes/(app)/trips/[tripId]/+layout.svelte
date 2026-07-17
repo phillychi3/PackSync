@@ -87,13 +87,15 @@
 	<title>{data.trip.name} | PackSync</title>
 </svelte:head>
 
-<div class="min-h-screen bg-[#f4f5f2] text-[#151817]">
-	<header class="border-b border-black/15 bg-[#f4f5f2]/95 backdrop-blur">
+<div class="min-h-screen bg-[#f4f5f2] text-[#151817] dark:bg-background dark:text-foreground">
+	<header
+		class="border-b border-black/15 bg-[#f4f5f2]/95 backdrop-blur dark:border-white/15 dark:bg-[#151817]/95"
+	>
 		<div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
 			<div class="min-w-0">
 				<a
 					href={resolve('/trips')}
-					class="mb-2 inline-flex items-center gap-2 text-xs font-bold text-black/50 hover:text-black"
+					class="mb-2 inline-flex items-center gap-2 text-xs font-bold text-black/50 hover:text-black dark:text-white/50 dark:hover:text-white"
 				>
 					<ArrowLeft class="size-3.5" /> 返回旅程
 				</a>
@@ -106,16 +108,15 @@
 					<button
 						type="button"
 						onclick={installApp}
-						class="border border-black/15 bg-white px-2 py-1 text-xs font-bold hover:border-black"
+						class="border border-black/15 bg-white px-2 py-1 text-xs font-bold hover:border-black dark:border-white/15 dark:bg-card dark:hover:border-white/50"
 						title="安裝 PackSync"
 					>
 						安裝 App
 					</button>
 				{/if}
-				<!-- eslint-disable svelte/no-navigation-without-resolve -->
 				<a
 					href={route(`${base}/notifications`)}
-					class="relative grid size-7 place-items-center border border-black/15 bg-white hover:border-black"
+					class="relative grid size-7 place-items-center border border-black/15 bg-white hover:border-black dark:border-white/15 dark:bg-card dark:text-white dark:hover:border-white/50"
 					title="通知"
 					aria-label="通知{unreadCount > 0 ? `（${unreadCount} 則未讀）` : ''}"
 				>
@@ -128,7 +129,6 @@
 						</span>
 					{/if}
 				</a>
-				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				<span class="bg-[#d8ff36] px-2 py-1 text-[10px] font-bold text-black"
 					>{data.role === 'owner' ? '擁有者' : data.role === 'admin' ? '管理員' : '成員'}</span
 				>
@@ -141,18 +141,16 @@
 			{#each links as link (link.href)}
 				{@const Icon = link.icon}
 				{@const current = isCurrent(link.href)}
-				<!-- eslint-disable svelte/no-navigation-without-resolve -->
 				<a
 					href={route(link.href)}
 					aria-current={current ? 'page' : undefined}
 					class="flex shrink-0 items-center gap-2 border px-3 py-2 text-sm font-bold transition {current
 						? 'border-black bg-[#d8ff36] text-black'
-						: 'border-transparent text-black/55 hover:border-black/15 hover:bg-white hover:text-black'}"
+						: 'border-transparent text-black/55 hover:border-black/15 hover:bg-white hover:text-black dark:text-white/55 dark:hover:border-white/15 dark:hover:bg-white/10 dark:hover:text-white'}"
 				>
 					<Icon class="size-4" />
 					{link.label}
 				</a>
-				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			{/each}
 		</nav>
 	</header>
@@ -167,7 +165,7 @@
 			onclick={() => (moreOpen = false)}
 		></button>
 		<div
-			class="fixed inset-x-0 bottom-[calc(3.25rem+env(safe-area-inset-bottom))] z-[1000] border-t border-black/15 bg-white sm:hidden"
+			class="fixed inset-x-0 bottom-[calc(3.25rem+env(safe-area-inset-bottom))] z-[1000] border-t border-black/15 bg-white dark:border-white/15 dark:bg-card sm:hidden"
 			role="menu"
 			aria-label="更多功能"
 		>
@@ -175,51 +173,47 @@
 				{#each moreLinks as link (link.href)}
 					{@const Icon = link.icon}
 					{@const current = isCurrent(link.href)}
-					<!-- eslint-disable svelte/no-navigation-without-resolve -->
 					<a
 						href={route(link.href)}
 						aria-current={current ? 'page' : undefined}
 						class="flex items-center gap-3 border px-3 py-2.5 text-sm font-bold {current
 							? 'border-black bg-[#d8ff36] text-black'
-							: 'border-transparent text-black/70 hover:bg-[#f4f5f2]'}"
+							: 'border-transparent text-black/70 hover:bg-[#f4f5f2] dark:text-white/70 dark:hover:bg-white/10'}"
 						onclick={() => (moreOpen = false)}
 					>
 						<Icon class="size-4" />
 						{link.label}
 					</a>
-					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				{/each}
 			</div>
 		</div>
 	{/if}
 	<nav
-		class="fixed inset-x-0 bottom-0 z-[1000] border-t border-black/15 bg-white pb-[env(safe-area-inset-bottom)] sm:hidden"
+		class="fixed inset-x-0 bottom-0 z-[1000] border-t border-black/15 bg-white pb-[env(safe-area-inset-bottom)] dark:border-white/15 dark:bg-card sm:hidden"
 		aria-label="旅程功能（手機）"
 	>
 		<div class="grid grid-cols-5">
 			{#each bottomLinks as link (link.href)}
 				{@const Icon = link.icon}
 				{@const current = isCurrent(link.href)}
-				<!-- eslint-disable svelte/no-navigation-without-resolve -->
 				<a
 					href={route(link.href)}
 					aria-current={current ? 'page' : undefined}
 					class="flex flex-col items-center gap-1 py-2 text-[10px] font-bold {current
 						? 'bg-[#d8ff36] text-black'
-						: 'text-black/50'}"
+						: 'text-black/50 dark:text-white/55'}"
 					onclick={() => (moreOpen = false)}
 				>
 					<Icon class="size-5" />
 					{link.label}
 				</a>
-				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			{/each}
 			<button
 				type="button"
 				aria-expanded={moreOpen}
 				class="flex flex-col items-center gap-1 py-2 text-[10px] font-bold {moreOpen || moreCurrent
 					? 'bg-[#d8ff36] text-black'
-					: 'text-black/50'}"
+					: 'text-black/50 dark:text-white/55'}"
 				onclick={() => (moreOpen = !moreOpen)}
 			>
 				<Ellipsis class="size-5" />

@@ -118,7 +118,7 @@
 
 		<section class="mt-6 border border-black/10 bg-white p-6 sm:p-8">
 			<div class="flex items-center gap-3">
-				<div class="grid size-10 place-items-center bg-[#d8ff36]">
+				<div class="grid size-10 place-items-center bg-[#d8ff36] text-black">
 					<ShieldAlert class="size-5" />
 				</div>
 				<div>
