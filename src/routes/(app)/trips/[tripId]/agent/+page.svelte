@@ -191,7 +191,7 @@
 	{/if}
 
 	<section
-		class="flex min-w-0 flex-col border border-black/10 bg-white max-sm:h-[calc(100dvh-10rem)] max-sm:border-x-0 sm:h-[calc(100dvh-16rem)] sm:min-h-120"
+		class="flex min-w-0 flex-col border border-black/10 bg-white max-sm:h-[calc(100dvh-9rem)] max-sm:border-x-0 sm:h-[calc(100dvh-16rem)] sm:min-h-120"
 	>
 		<div class="flex items-center gap-3 border-b border-black/10 p-4 sm:p-7">
 			<div class="grid size-10 shrink-0 place-items-center bg-[#d8ff36]">

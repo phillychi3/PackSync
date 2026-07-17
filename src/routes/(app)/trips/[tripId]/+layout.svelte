@@ -100,9 +100,6 @@
 				<h1 class="truncate text-xl font-black tracking-[-0.035em] sm:text-2xl">
 					{data.trip.name}
 				</h1>
-				{#if data.trip.destination}<p class="truncate text-sm text-black/50">
-						{data.trip.destination}
-					</p>{/if}
 			</div>
 			<div class="flex shrink-0 items-center gap-2">
 				{#if canInstall}

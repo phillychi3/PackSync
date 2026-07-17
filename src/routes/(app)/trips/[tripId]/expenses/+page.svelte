@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths'
 	import { ArrowRight, CircleDollarSign, Plus, RefreshCw } from '@lucide/svelte'
-	import { Axis, Bars, Chart, Layer } from 'layerchart'
+	import { Axis, Bars, Chart, Layer, Pie } from 'layerchart'
 	import { ChartContainer } from '$lib/components/ui/chart'
 	import type { ChartConfig } from '$lib/components/ui/chart'
 	import { onMount } from 'svelte'
@@ -69,6 +69,17 @@
 	let categoryChartData = $derived(categoryStats.map(([label, amount]) => ({ label, amount })))
 	let categoryChartLabels = $derived(categoryChartData.map((item) => item.label))
 	let categoryChartMax = $derived(Math.max(...categoryChartData.map((item) => item.amount), 1))
+	const CHART_COLORS = [
+		'var(--chart-1)',
+		'var(--chart-2)',
+		'var(--chart-3)',
+		'var(--chart-4)',
+		'var(--chart-5)'
+	]
+	let categoryChartColors = $derived(
+		categoryChartData.map((_, index) => CHART_COLORS[index % CHART_COLORS.length])
+	)
+	let filteredTotal = $derived(filteredBills.reduce((sum, bill) => sum + bill.amount, 0))
 	let dailyChartData = $derived.by(() => {
 		const result = new Map<string, number>()
 		for (const bill of filteredBills) {
@@ -335,36 +346,43 @@
 					<h4 class="font-bold">依類別</h4>
 					<span class="font-mono text-xs text-black/45"
 						>{data.trip.currency}
-						{filteredBills.reduce((sum, bill) => sum + bill.amount, 0).toFixed(2)}</span
+						{filteredTotal.toFixed(2)}</span
 					>
 				</div>
 				{#if chartsReady && categoryChartData.length > 0}
 					{#key categoryChartLabels.join('|') + ':' + categoryChartMax}
-						<ChartContainer config={categoryChartConfig} class="h-56 w-full min-w-0">
-							<Chart
-								data={categoryChartData}
-								x="label"
-								y="amount"
-								xDomain={categoryChartLabels}
-								yDomain={[0, categoryChartMax]}
-								yBaseline={0}
-								bandPadding={0.35}
-								padding={{ top: 12, right: 12, bottom: 32, left: 42 }}
-							>
-								<Layer type="svg">
-									<Axis placement="left" grid tickMarks={false} />
-									<Axis placement="bottom" tickMarks={false} />
-									<Bars
-										data={categoryChartData}
-										x="label"
-										y="amount"
-										radius={4}
-										fill="var(--chart-1)"
-										tooltip
-									/>
-								</Layer>
-							</Chart>
-						</ChartContainer>
+						<div class="flex flex-col items-center gap-5 sm:flex-row">
+							<ChartContainer config={categoryChartConfig} class="aspect-square h-56 shrink-0">
+								<Chart
+									data={categoryChartData}
+									x="amount"
+									c="label"
+									cDomain={categoryChartLabels}
+									cRange={categoryChartColors}
+								>
+									<Layer type="svg" center>
+										<Pie innerRadius={-26} padAngle={0.015} tooltip />
+									</Layer>
+								</Chart>
+							</ChartContainer>
+							<div class="grid w-full min-w-0 flex-1 gap-1.5">
+								{#each categoryChartData as item, index (item.label)}
+									<div class="flex items-center gap-2 text-sm">
+										<i
+											class="size-3 shrink-0 border border-black/15"
+											style={`background:${categoryChartColors[index]}`}
+										></i>
+										<span class="min-w-0 flex-1 truncate">{item.label}</span>
+										<span class="font-mono text-xs text-black/60"
+											>{data.trip.currency} {item.amount.toFixed(2)}</span
+										>
+										<span class="w-12 text-right font-mono text-xs text-black/40"
+											>{((item.amount / (filteredTotal || 1)) * 100).toFixed(1)}%</span
+										>
+									</div>
+								{/each}
+							</div>
+						</div>
 					{/key}
 				{:else}<p class="text-sm text-black/40">沒有符合日期的費用。</p>{/if}
 			</div>
