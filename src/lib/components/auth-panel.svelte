@@ -64,7 +64,7 @@
 				{isLogin ? '還沒有帳號？' : '已經是成員？'}
 				<a
 					class="ml-2 font-bold text-black underline decoration-[#a7ca18] decoration-2 underline-offset-4"
-					href={isLogin ? '/register' : '/login'}>{isLogin ? '免費註冊' : '登入'}</a
+					href={isLogin ? '/register' : '/login'}>{isLogin ? '註冊' : '登入'}</a
 				>
 			</p>
 		</header>
@@ -164,7 +164,7 @@
 						type="submit"
 						disabled={submitting}
 						class="group flex h-14 w-full items-center justify-between bg-[#171a19] px-5 font-bold text-white transition hover:bg-black disabled:cursor-wait disabled:opacity-60"
-						><span>{submitting ? '處理中…' : isLogin ? '登入工作區' : '建立免費帳號'}</span
+						><span>{submitting ? '處理中…' : isLogin ? '登入工作區' : '建立帳號'}</span
 						>{#if submitting}<span
 								class="size-4 animate-spin rounded-full border-2 border-white/30 border-t-[#d8ff36]"
 							></span>{:else}<ArrowRight

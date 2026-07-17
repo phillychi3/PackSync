@@ -22,6 +22,29 @@ type MotisItinerary = {
 	endTime?: string | number
 	transfers?: number
 	legs?: MotisLeg[]
+	fareTransfers?: MotisFareTransfer[]
+}
+
+type MotisFareProduct = {
+	name?: string
+	amount: number
+	currency: string
+	riderCategory?: {
+		riderCategoryName?: string
+		isDefaultFareCategory?: boolean
+	}
+}
+
+type MotisFareTransfer = {
+	rule?: 'A_AB' | 'A_AB_B' | 'AB'
+	transferProducts?: MotisFareProduct[]
+	effectiveFareLegProducts?: MotisFareProduct[][][]
+}
+
+type FareEstimate = {
+	amount: number
+	currency: string
+	products: string[]
 }
 
 type TransitResponse = {
@@ -40,6 +63,7 @@ type TransitResponse = {
 	arrivalTime: string | null
 	transfers: number | null
 	services: string[]
+	fares: FareEstimate[]
 }
 
 const SUCCESS_CACHE_MS = 5 * 60 * 1000
@@ -81,7 +105,8 @@ function emptyRoute(): TransitResponse {
 		departureTime: null,
 		arrivalTime: null,
 		transfers: null,
-		services: []
+		services: [],
+		fares: []
 	}
 }
 
@@ -117,6 +142,59 @@ function motisServiceName(leg: MotisLeg) {
 	return transitModeLabel(leg.mode)
 }
 
+function flattenFareProducts(value: unknown): MotisFareProduct[] {
+	if (Array.isArray(value)) return value.flatMap(flattenFareProducts)
+	if (
+		typeof value === 'object' &&
+		value !== null &&
+		typeof (value as MotisFareProduct).amount === 'number' &&
+		typeof (value as MotisFareProduct).currency === 'string'
+	) {
+		return [value as MotisFareProduct]
+	}
+	return []
+}
+
+function cheapestDefaultProducts(products: MotisFareProduct[]) {
+	const eligible = products.filter(
+		(product) => product.riderCategory?.isDefaultFareCategory !== false
+	)
+	const cheapest = new Map<string, MotisFareProduct>()
+	for (const product of eligible) {
+		const currency = product.currency.toUpperCase()
+		const current = cheapest.get(currency)
+		if (!current || product.amount < current.amount) cheapest.set(currency, product)
+	}
+	return cheapest
+}
+
+function estimateFares(transfers: MotisFareTransfer[] | undefined): FareEstimate[] {
+	if (!transfers?.length) return []
+	const totals = new Map<string, { amount: number; products: Set<string> }>()
+	for (const transfer of transfers) {
+		const effectiveLegs = transfer.effectiveFareLegProducts ?? []
+		const chargedGroups: unknown[] = []
+		if (transfer.rule !== 'AB') {
+			chargedGroups.push(...(transfer.rule === 'A_AB' ? effectiveLegs.slice(0, 1) : effectiveLegs))
+		}
+		if (transfer.transferProducts?.length) chargedGroups.push(transfer.transferProducts)
+
+		for (const group of chargedGroups) {
+			for (const [currency, product] of cheapestDefaultProducts(flattenFareProducts(group))) {
+				const total = totals.get(currency) ?? { amount: 0, products: new Set<string>() }
+				total.amount += product.amount
+				if (product.name?.trim()) total.products.add(product.name.trim())
+				totals.set(currency, total)
+			}
+		}
+	}
+	return [...totals.entries()].map(([currency, total]) => ({
+		amount: Math.round(total.amount * 100) / 100,
+		currency,
+		products: [...total.products]
+	}))
+}
+
 // 使用算術運算而非位元運算：precision 7 時經度的 zigzag 值會超過 32-bit，位元運算會溢位
 function decodePolyline(encoded: string, precision: number): [number, number][] {
 	const factor = Math.pow(10, precision)
@@ -149,7 +227,7 @@ function decodePolyline(encoded: string, precision: number): [number, number][] 
  * - Elsewhere: Transitous (community MOTIS instance, free, no key; coverage varies)
  * An empty legs array means the caller should fall back to a straight line.
  */
-export const GET: RequestHandler = async ({ locals, params, url }) => {
+export const GET: RequestHandler = async ({ locals, params, url, fetch: eventFetch }) => {
 	const user = requireAuth(locals)
 	await requireMember(user.id, params.tripId)
 
@@ -165,16 +243,16 @@ export const GET: RequestHandler = async ({ locals, params, url }) => {
 	if (cached) return json(cached, { headers: { 'x-route-cache': 'HIT' } })
 
 	if (tdxConfigured() && inTaiwan(fromLat, fromLng) && inTaiwan(toLat, toLng)) {
-		const route = await tdxTransitRoute([fromLat, fromLng], [toLat, toLng])
+		const route = await tdxTransitRoute([fromLat, fromLng], [toLat, toLng], eventFetch)
 		if (route) {
-			const value: TransitResponse = { ...route, source: 'TDX' }
+			const value: TransitResponse = { ...route, source: 'TDX', fares: [] }
 			return json(cacheRoute(cacheKey, value), { headers: { 'x-route-cache': 'MISS' } })
 		}
 	}
 
 	try {
-		const upstream = await fetch(
-			`https://api.transitous.org/api/v1/plan?fromPlace=${fromLat},${fromLng}&toPlace=${toLat},${toLng}`,
+		const upstream = await eventFetch(
+			`https://api.transitous.org/api/v5/plan?fromPlace=${fromLat},${fromLng}&toPlace=${toLat},${toLng}&withFares=true`,
 			{
 				headers: {
 					'User-Agent': 'PackSync/1.0 travel-planning-pwa (https://github.com/phillychi3)'
@@ -196,7 +274,7 @@ export const GET: RequestHandler = async ({ locals, params, url }) => {
 				toName: leg.to?.name,
 				departureTime: toIsoTime(leg.startTime),
 				arrivalTime: toIsoTime(leg.endTime),
-				coords: decodePolyline(leg.legGeometry!.points, leg.legGeometry!.precision ?? 7)
+				coords: decodePolyline(leg.legGeometry!.points, leg.legGeometry!.precision ?? 6)
 			}))
 			.filter((leg) => leg.coords.length >= 2)
 
@@ -215,7 +293,8 @@ export const GET: RequestHandler = async ({ locals, params, url }) => {
 				...new Set(
 					transitLegs.map(motisServiceName).filter((name): name is string => Boolean(name))
 				)
-			]
+			],
+			fares: estimateFares(itinerary.fareTransfers)
 		}
 		return json(cacheRoute(cacheKey, value), { headers: { 'x-route-cache': 'MISS' } })
 	} catch {

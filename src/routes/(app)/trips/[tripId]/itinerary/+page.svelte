@@ -339,6 +339,7 @@
 		arrivalTime: string | null
 		transfers: number | null
 		services: string[]
+		fares: { amount: number; currency: string; products: string[] }[]
 	}
 	type RoadRoute = {
 		coords: [number, number][]
@@ -356,7 +357,7 @@
 	const ROAD_CACHE_MS = 7 * 24 * 60 * 60 * 1000
 	const TRANSIT_CACHE_MS = 5 * 60 * 1000
 	const EMPTY_CACHE_MS = 60 * 1000
-	const CACHE_PREFIX = 'packsync:route:v2:'
+	const CACHE_PREFIX = 'packsync:route:v3:'
 	const MAX_STORED_ROUTES = 40
 	const routeCache: Record<string, RoadRoute> = {}
 	const routeMissCache: Record<string, number> = {}
@@ -445,7 +446,8 @@
 				departureTime: body.departureTime ?? null,
 				arrivalTime: body.arrivalTime ?? null,
 				transfers: body.transfers ?? null,
-				services: body.services ?? []
+				services: body.services ?? [],
+				fares: body.fares ?? []
 			}
 			const ttl = route.legs.length > 0 ? TRANSIT_CACHE_MS : EMPTY_CACHE_MS
 			transitCache[key] = { value: route, expiresAt: Date.now() + ttl }
@@ -459,7 +461,8 @@
 				departureTime: null,
 				arrivalTime: null,
 				transfers: null,
-				services: []
+				services: [],
+				fares: []
 			}
 			transitCache[key] = { value: route, expiresAt: Date.now() + EMPTY_CACHE_MS }
 			storeRoute(key, route, EMPTY_CACHE_MS)
@@ -622,6 +625,17 @@
 		return Number.isNaN(date.getTime())
 			? ''
 			: new Intl.DateTimeFormat('zh-TW', { hour: '2-digit', minute: '2-digit' }).format(date)
+	}
+
+	function formatFare(fare: { amount: number; currency: string }) {
+		try {
+			return new Intl.NumberFormat('zh-TW', {
+				style: 'currency',
+				currency: fare.currency
+			}).format(fare.amount)
+		} catch {
+			return `${fare.currency} ${fare.amount}`
+		}
 	}
 
 	function focusItemOnMap(item: Item) {
@@ -866,7 +880,6 @@
 	<div class="border-b border-black/15 pb-6">
 		<p class="font-mono text-xs font-bold tracking-[0.18em] text-black/45">01 / 行程</p>
 		<h2 class="mt-3 text-4xl font-black tracking-[-0.05em]">每日安排</h2>
-		<p class="mt-3 text-black/55">把景點、活動與移動安排在正確的日期。</p>
 	</div>
 
 	<!-- View toggle -->
@@ -1083,7 +1096,6 @@
 							{/each}
 						</div>
 					{/each}
-					<p class="px-4 py-2 text-xs text-black/40">點選日期會切換到該日的清單檢視。</p>
 				</div>
 			{:else}
 				<div class="grid gap-3">
@@ -1191,6 +1203,18 @@
 																	>
 																		搭乘：{optionState.transit.services.join(' → ')}
 																	</p>
+																{/if}
+																{#if optionState.transit.fares.length > 0}
+																	<p class="mt-1 text-[10px] font-bold text-black/70">
+																		預估票價：{optionState.transit.fares
+																			.map(formatFare)
+																			.join(' / ')}
+																	</p>
+																	<p class="mt-0.5 text-[9px] text-black/35">
+																		成人／預設票種；實際金額以營運單位為準
+																	</p>
+																{:else}
+																	<p class="mt-1 text-[10px] text-black/40">票價：資料來源未提供</p>
 																{/if}
 																<p class="mt-1 text-[9px] text-black/35">
 																	來源：{optionState.transit.source}

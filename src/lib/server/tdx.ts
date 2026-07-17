@@ -9,10 +9,10 @@ export function inTaiwan(lat: number, lng: number) {
 
 let cachedToken: { token: string; expiresAt: number } | null = null
 
-async function getTdxToken(): Promise<string | null> {
+async function getTdxToken(fetcher: typeof globalThis.fetch): Promise<string | null> {
 	if (cachedToken && cachedToken.expiresAt > Date.now() + 60000) return cachedToken.token
 	try {
-		const res = await fetch(
+		const res = await fetcher(
 			'https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token',
 			{
 				method: 'POST',
@@ -135,12 +135,13 @@ function sectionCoords(section: TdxSection): [number, number][] | null {
 
 export async function tdxTransitRoute(
 	from: [number, number],
-	to: [number, number]
+	to: [number, number],
+	fetcher: typeof globalThis.fetch = globalThis.fetch
 ): Promise<TransitRoute | null> {
-	const token = await getTdxToken()
+	const token = await getTdxToken(fetcher)
 	if (!token) return null
 	try {
-		const res = await fetch(
+		const res = await fetcher(
 			`https://tdx.transportdata.tw/api/maas/routing?origin=${from[0]},${from[1]}&destination=${to[0]},${to[1]}&gc=1.0&top=1&transit=3,4,5,6,7,8,9`,
 			{
 				headers: { authorization: `Bearer ${token}` },

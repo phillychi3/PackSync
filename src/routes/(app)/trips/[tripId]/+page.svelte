@@ -251,9 +251,6 @@
 				<h2 class="mt-3 max-w-3xl text-4xl font-black tracking-[-0.055em] sm:text-6xl">
 					{data.trip.status === 'completed' ? '旅程紀錄。' : '準備好一起出發。'}
 				</h2>
-				<p class="mt-4 max-w-2xl text-base leading-7 text-black/55">
-					把日期、行李、費用和每個人的任務，集中在這趟旅程裡。
-				</p>
 				<div class="mt-5 flex flex-wrap gap-4 text-sm text-black/55">
 					{#if data.trip.destination}<span class="flex items-center gap-2"
 							><MapPin class="size-4 text-[#779a00]" />{data.trip.destination}</span
