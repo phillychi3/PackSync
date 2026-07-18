@@ -7,6 +7,9 @@ declare const self: ServiceWorkerGlobalScope
 const PRECACHE_PREFIX = 'packsync-precache-'
 const PRECACHE = `${PRECACHE_PREFIX}${version}`
 const PRECACHE_ASSETS = [...build, ...files]
+const PRECACHE_URLS = new Set(
+	PRECACHE_ASSETS.map((path) => new URL(path, self.location.origin).href)
+)
 
 self.addEventListener('install', (event) => {
 	event.waitUntil(
@@ -165,6 +168,20 @@ self.addEventListener('fetch', (event) => {
 		return
 	}
 
+	if (PRECACHE_URLS.has(url.href)) {
+		event.respondWith(
+			(async () => {
+				const precache = await caches.open(PRECACHE)
+				const cached = await precache.match(event.request)
+				if (cached) return cached
+				const response = await fetch(event.request)
+				if (response.ok) event.waitUntil(precache.put(event.request, response.clone()))
+				return response
+			})()
+		)
+		return
+	}
+
 	const isSvelteKitData =
 		url.origin === self.location.origin && url.pathname.endsWith('/__data.json')
 	const isStaticAsset =
@@ -194,7 +211,7 @@ self.addEventListener('fetch', (event) => {
 			try {
 				const response = await fetch(event.request)
 				if (response.ok) {
-					await cache.put(event.request, response.clone())
+					event.waitUntil(cache.put(event.request, response.clone()))
 					return response
 				}
 

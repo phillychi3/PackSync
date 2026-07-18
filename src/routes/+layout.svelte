@@ -6,11 +6,22 @@
 	import { isNetworkReachable } from '$lib/network'
 	import { toast } from '$lib/stores/toast'
 	import { initializeDarkMode } from '$lib/theme'
+	import { onNavigate } from '$app/navigation'
 	import { onMount } from 'svelte'
 
 	let { children } = $props()
 	let offline = $state(false)
 	let offlineSince = $state<string | null>(null)
+
+	onNavigate((navigation) => {
+		if (!document.startViewTransition) return
+		return new Promise((resolve) => {
+			document.startViewTransition(async () => {
+				resolve()
+				await navigation.complete
+			})
+		})
+	})
 
 	onMount(() => {
 		initializeDarkMode()

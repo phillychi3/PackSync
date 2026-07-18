@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths'
-	import { page } from '$app/state'
+	import { navigating, page } from '$app/state'
 	import {
 		ArrowLeft,
 		Bell,
@@ -76,7 +76,7 @@
 	let moreOpen = $state(false)
 
 	function isCurrent(href: string) {
-		const path = page.url.pathname
+		const path = navigating.to?.url.pathname ?? page.url.pathname
 		if (href === base) return path === base
 		return path === href || path.startsWith(`${href}/`)
 	}
@@ -89,7 +89,7 @@
 
 <div class="min-h-screen bg-[#f4f5f2] text-[#151817] dark:bg-background dark:text-foreground">
 	<header
-		class="border-b border-black/15 bg-[#f4f5f2]/95 backdrop-blur dark:border-white/15 dark:bg-[#151817]/95"
+		class="border-b border-black/15 bg-[#f4f5f2]/95 backdrop-blur [view-transition-name:trip-header] dark:border-white/15 dark:bg-[#151817]/95"
 	>
 		<div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
 			<div class="min-w-0">
@@ -189,7 +189,7 @@
 		</div>
 	{/if}
 	<nav
-		class="fixed inset-x-0 bottom-0 z-[1000] border-t border-black/15 bg-white pb-[env(safe-area-inset-bottom)] dark:border-white/15 dark:bg-card sm:hidden"
+		class="fixed inset-x-0 bottom-0 z-[1000] border-t border-black/15 bg-white pb-[env(safe-area-inset-bottom)] [view-transition-name:trip-nav] dark:border-white/15 dark:bg-card sm:hidden"
 		aria-label="旅程功能（手機）"
 	>
 		<div class="grid grid-cols-5">

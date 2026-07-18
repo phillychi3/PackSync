@@ -11,47 +11,48 @@ import {
 import { and, asc, eq } from 'drizzle-orm'
 import type { PageServerLoad } from './$types'
 
-export const load: PageServerLoad = async ({ locals, params }) => {
+export const load: PageServerLoad = ({ locals, params }) => {
 	const userId = locals.user!.id
-	const [members, itinerary, bills, lists, todos, criticalItems, pendingSettlements] =
-		await Promise.all([
-			db.query.tripMember.findMany({ where: eq(tripMember.tripId, params.tripId) }),
-			db.query.scheduleItem.findMany({
-				where: eq(scheduleItem.tripId, params.tripId),
-				orderBy: [asc(scheduleItem.date), asc(scheduleItem.order)],
-				with: { place: true }
-			}),
-			db.query.bill.findMany({ where: eq(bill.tripId, params.tripId) }),
-			db.query.packingList.findMany({
-				where: eq(packingList.tripId, params.tripId),
-				with: { items: true }
-			}),
-			db.query.todo.findMany({ where: eq(todo.tripId, params.tripId) }),
-			db.query.criticalItem.findMany({
-				where: eq(criticalItem.tripId, params.tripId),
-				with: { confirmations: true }
-			}),
-			db.query.settlement.findMany({
+	const criticalItems = db.query.criticalItem.findMany({
+		where: eq(criticalItem.tripId, params.tripId),
+		with: { confirmations: true }
+	})
+
+	return {
+		itinerary: db.query.scheduleItem.findMany({
+			where: eq(scheduleItem.tripId, params.tripId),
+			orderBy: [asc(scheduleItem.date), asc(scheduleItem.order)],
+			with: { place: true }
+		}),
+		memberCount: db.query.tripMember
+			.findMany({ where: eq(tripMember.tripId, params.tripId) })
+			.then((members) => members.length),
+		billCount: db.query.bill
+			.findMany({ where: eq(bill.tripId, params.tripId) })
+			.then((bills) => bills.length),
+		packingCount: db.query.packingList
+			.findMany({ where: eq(packingList.tripId, params.tripId), with: { items: true } })
+			.then((lists) => lists.reduce((sum, list) => sum + list.items.length, 0)),
+		todoCount: db.query.todo
+			.findMany({ where: eq(todo.tripId, params.tripId) })
+			.then((todos) => todos.filter((item) => !item.isCompleted).length),
+		critical: criticalItems.then((items) => ({
+			count: items.length,
+			unconfirmed: items.filter(
+				(item) => !item.confirmations.some((confirmation) => confirmation.userId === userId)
+			).length
+		})),
+		pendingPayments: db.query.settlement
+			.findMany({
 				where: and(
 					eq(settlement.tripId, params.tripId),
 					eq(settlement.fromUserId, userId),
 					eq(settlement.isSettled, false)
 				)
 			})
-		])
-
-	return {
-		memberCount: members.length,
-		itinerary,
-		billCount: bills.length,
-		packingCount: lists.reduce((sum, list) => sum + list.items.length, 0),
-		todoCount: todos.filter((item) => !item.isCompleted).length,
-		criticalCount: criticalItems.length,
-		criticalUnconfirmed: criticalItems.filter(
-			(item) => !item.confirmations.some((confirmation) => confirmation.userId === userId)
-		).length,
-		pendingPaymentCount: pendingSettlements.length,
-		pendingPaymentTotal:
-			Math.round(pendingSettlements.reduce((sum, s) => sum + s.amount, 0) * 100) / 100
+			.then((rows) => ({
+				count: rows.length,
+				total: Math.round(rows.reduce((sum, s) => sum + s.amount, 0) * 100) / 100
+			}))
 	}
 }

@@ -31,12 +31,56 @@
 		completed: '已完成'
 	}
 
+	type Stats = {
+		itinerary: Awaited<PageData['itinerary']>
+		memberCount: number
+		billCount: number
+		packingCount: number
+		todoCount: number
+		critical: Awaited<PageData['critical']>
+		pendingPayments: Awaited<PageData['pendingPayments']>
+	}
+	let stats = $state<Partial<Stats>>({})
+
+	$effect(() => {
+		const current = data
+		const keep = <T,>(promise: Promise<T>, assign: (value: T) => void) => {
+			promise
+				.then((value) => {
+					if (data === current) assign(value)
+				})
+				.catch(() => {})
+		}
+		keep(current.itinerary, (value) => {
+			stats.itinerary = value
+		})
+		keep(current.memberCount, (value) => {
+			stats.memberCount = value
+		})
+		keep(current.billCount, (value) => {
+			stats.billCount = value
+		})
+		keep(current.packingCount, (value) => {
+			stats.packingCount = value
+		})
+		keep(current.todoCount, (value) => {
+			stats.todoCount = value
+		})
+		keep(current.critical, (value) => {
+			stats.critical = value
+		})
+		keep(current.pendingPayments, (value) => {
+			stats.pendingPayments = value
+		})
+	})
+
 	const nextStop = $derived.by(() => {
+		if (!stats.itinerary) return null
 		const now = new Date()
 		const today = now.toISOString().slice(0, 10)
 		const time = now.toTimeString().slice(0, 5)
 		return (
-			data.itinerary.find((item) => {
+			stats.itinerary.find((item) => {
 				if (item.date > today) return true
 				if (item.date < today) return false
 				const end = item.endTime ?? item.startTime
@@ -87,42 +131,42 @@
 		{
 			href: `${base}/itinerary`,
 			label: '行程',
-			value: data.itinerary.length,
+			value: stats.itinerary?.length,
 			icon: CalendarDays,
 			text: '安排每日景點與活動'
 		},
 		{
 			href: `${base}/packing`,
 			label: '行李',
-			value: data.packingCount,
+			value: stats.packingCount,
 			icon: CheckSquare,
 			text: '整理共同攜帶物品'
 		},
 		{
 			href: `${base}/expenses`,
 			label: '費用',
-			value: data.billCount,
+			value: stats.billCount,
 			icon: CircleDollarSign,
 			text: '記錄並分攤旅費'
 		},
 		{
 			href: `${base}/todos`,
 			label: '待辦',
-			value: data.todoCount,
+			value: stats.todoCount,
 			icon: ListChecks,
 			text: '追蹤出發前任務'
 		},
 		{
 			href: `${base}/members`,
 			label: '成員',
-			value: data.memberCount,
+			value: stats.memberCount,
 			icon: Users,
 			text: '管理同行夥伴'
 		},
 		{
 			href: `${base}/critical`,
 			label: '重要事項',
-			value: data.criticalCount,
+			value: stats.critical?.count,
 			icon: CheckSquare,
 			text: '確認不能遺漏的事項'
 		}
@@ -196,25 +240,29 @@
 								<MapPin class="size-3 shrink-0" />{nextStop.place.name}
 							</p>
 						{/if}
-					{:else}
+					{:else if stats.itinerary}
 						<p class="mt-3 text-sm text-black/50">接下來沒有排定的行程。</p>
+					{:else}
+						<h3 class="mt-3 text-xl font-black text-black/20">–</h3>
 					{/if}
 				</a>
 				<a
 					href={route(`${base}/critical`)}
-					class="border p-5 transition {data.criticalUnconfirmed > 0
+					class="border p-5 transition {(stats.critical?.unconfirmed ?? 0) > 0
 						? 'border-amber-600 bg-amber-50 hover:bg-amber-100'
 						: 'border-black/15 bg-white hover:bg-[#fbffe8]'}"
 				>
 					<p
-						class="flex items-center gap-2 font-mono text-xs font-bold {data.criticalUnconfirmed > 0
+						class="flex items-center gap-2 font-mono text-xs font-bold {(stats.critical
+							?.unconfirmed ?? 0) > 0
 							? 'text-amber-700'
 							: 'text-[#779a00]'}"
 					>
 						<ShieldAlert class="size-4" /> 重要物品
 					</p>
-					<h3 class="mt-3 text-xl font-black">
-						{data.criticalUnconfirmed > 0 ? `${data.criticalUnconfirmed} 項待確認` : '全部已確認'}
+					<h3 class="mt-3 text-xl font-black {stats.critical ? '' : 'text-black/20'}">
+						{#if !stats.critical}–{:else if stats.critical.unconfirmed > 0}{stats.critical
+								.unconfirmed} 項待確認{:else}全部已確認{/if}
 					</h3>
 					<p class="mt-1 text-sm text-black/55">出發前檢查護照、票券等物品。</p>
 				</a>
@@ -225,15 +273,17 @@
 					<p class="flex items-center gap-2 font-mono text-xs font-bold text-[#779a00]">
 						<CircleDollarSign class="size-4" /> 待付款
 					</p>
-					<h3 class="mt-3 text-xl font-black">
-						{data.pendingPaymentCount > 0
-							? `${data.trip.currency} ${data.pendingPaymentTotal}`
-							: '沒有待付款'}
+					<h3 class="mt-3 text-xl font-black {stats.pendingPayments ? '' : 'text-black/20'}">
+						{#if !stats.pendingPayments}–{:else if stats.pendingPayments.count > 0}{data.trip
+								.currency}
+							{stats.pendingPayments.total}{:else}沒有待付款{/if}
 					</h3>
 					<p class="mt-1 text-sm text-black/55">
-						{data.pendingPaymentCount > 0
-							? `${data.pendingPaymentCount} 筆結算等你付款`
-							: '目前的分帳都已結清。'}
+						{#if stats.pendingPayments}
+							{stats.pendingPayments.count > 0
+								? `${stats.pendingPayments.count} 筆結算等你付款`
+								: '目前的分帳都已結清。'}
+						{/if}
 					</p>
 				</a>
 			</div>
@@ -289,7 +339,11 @@
 						<div class="flex items-start justify-between">
 							<span class="grid size-10 place-items-center bg-[#d8ff36] text-black"
 								><Icon class="size-5" /></span
-							><span class="font-mono text-3xl font-black">{card.value}</span>
+							><span
+								class="font-mono text-3xl font-black {card.value === undefined
+									? 'text-black/20'
+									: ''}">{card.value ?? '–'}</span
+							>
 						</div>
 						<h3 class="mt-8 text-xl font-black">{card.label}</h3>
 						<p class="mt-1 text-sm text-black/50">{card.text}</p>

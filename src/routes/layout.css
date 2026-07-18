@@ -117,6 +117,38 @@
 	--radius-4xl: calc(var(--radius) * 2.6);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+	::view-transition-old(root) {
+		animation: none;
+	}
+	::view-transition-new(root) {
+		animation: 120ms ease-out both view-fade-in;
+	}
+}
+
+::view-transition-group(trip-header),
+::view-transition-old(trip-header),
+::view-transition-new(trip-header),
+::view-transition-group(trip-nav),
+::view-transition-old(trip-nav),
+::view-transition-new(trip-nav) {
+	animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	::view-transition-group(*),
+	::view-transition-old(*),
+	::view-transition-new(*) {
+		animation: none;
+	}
+}
+
+@keyframes view-fade-in {
+	from {
+		opacity: 0;
+	}
+}
+
 @layer base {
 	* {
 		@apply border-border outline-ring/50;
