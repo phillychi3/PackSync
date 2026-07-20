@@ -20,20 +20,27 @@ self.addEventListener('install', (event) => {
 	)
 })
 
+const OFFLINE_CACHE = 'packsync-offline-v1'
+const MAX_OFFLINE_ENTRIES = 60
+
 self.addEventListener('activate', (event) => {
+	const keep = new Set([PRECACHE, OFFLINE_CACHE])
 	event.waitUntil(
 		caches
 			.keys()
-			.then((keys) =>
-				Promise.all(
-					keys
-						.filter((key) => key.startsWith(PRECACHE_PREFIX) && key !== PRECACHE)
-						.map((key) => caches.delete(key))
-				)
-			)
+			.then((keys) => Promise.all(keys.filter((key) => !keep.has(key)).map((key) => caches.delete(key))))
 			.then(() => self.clients.claim())
 	)
 })
+
+async function trimCache(cacheName: string, maxEntries: number) {
+	const cache = await caches.open(cacheName)
+	const keys = await cache.keys()
+	if (keys.length <= maxEntries) return
+	for (const request of keys.slice(0, keys.length - maxEntries)) {
+		await cache.delete(request)
+	}
+}
 
 type OutboxEntry = {
 	id?: number
@@ -48,7 +55,6 @@ type OutboxEntry = {
 const OUTBOX_DB = 'packsync-outbox'
 const OUTBOX_STORE = 'requests'
 const QUEUEABLE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
-const OFFLINE_CACHE = 'packsync-offline-v1'
 
 function openOutbox(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
@@ -194,6 +200,14 @@ self.addEventListener('fetch', (event) => {
 		isStaticAsset
 	if (!shouldCache) return
 
+	// SvelteKit appends volatile query params (e.g. x-sveltekit-invalidated) to
+	// __data.json requests, so caching under the full URL creates a brand new
+	// entry on every navigation instead of overwriting. Normalize the storage
+	// key to the pathname so refreshes replace the old entry rather than pile up.
+	const cacheKey = isSvelteKitData
+		? new Request(url.origin + url.pathname, { headers: event.request.headers })
+		: event.request
+
 	event.respondWith(
 		(async () => {
 			const cache = await caches.open(OFFLINE_CACHE)
@@ -211,7 +225,11 @@ self.addEventListener('fetch', (event) => {
 			try {
 				const response = await fetch(event.request)
 				if (response.ok) {
-					event.waitUntil(cache.put(event.request, response.clone()))
+					event.waitUntil(
+						cache
+							.put(cacheKey, response.clone())
+							.then(() => trimCache(OFFLINE_CACHE, MAX_OFFLINE_ENTRIES))
+					)
 					return response
 				}
 

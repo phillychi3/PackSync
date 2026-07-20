@@ -11,6 +11,7 @@ import {
 	scheduleItem,
 	todo,
 	criticalItem,
+	trip,
 	tripMember,
 	user
 } from '$lib/server/db/schema'
@@ -253,7 +254,8 @@ async function searchPlace(query: string) {
 }
 
 async function buildTripContext(tripId: string) {
-	const [places, schedule, bills, todos, criticals, members] = await Promise.all([
+	const [tripRow, places, schedule, bills, todos, criticals, members] = await Promise.all([
+		db.query.trip.findFirst({ where: eq(trip.id, tripId) }),
 		db.query.place.findMany({ where: eq(place.tripId, tripId) }),
 		db.query.scheduleItem.findMany({
 			where: eq(scheduleItem.tripId, tripId),
@@ -275,7 +277,14 @@ async function buildTripContext(tripId: string) {
 			.where(eq(tripMember.tripId, tripId))
 	])
 
+	const today = new Date().toISOString().slice(0, 10)
+
 	return `
+## 旅行資訊
+- 今天日期：${today}
+- 旅程名稱：${tripRow?.name ?? '未命名'}${tripRow?.destination ? `（目的地：${tripRow.destination}）` : ''}
+- 旅程日期：${tripRow?.startDate ?? '未設定'} ~ ${tripRow?.endDate ?? '未設定'}
+
 ## 旅行成員
 ${members.map((m) => `- ${m.name} (${m.role})`).join('\n')}
 
@@ -341,7 +350,11 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 					role: 'system',
 					content: `你是一個旅行助理，專門幫助旅行團解答問題、規劃行程、查詢費用等。回答請使用繁體中文 Markdown。
 
-當使用者要求新增、修改或刪除資料時，使用對應工具建立「變更提案」。提案不會立即寫入，使用者會在介面上看到提案卡片並自行按下確認。你的回覆中要簡短說明提案內容，並提醒使用者確認，不要宣稱變更已完成。一次規劃多筆行程時請用 import_itinerary 建立單一批次提案。search_place 工具可即時查詢真實地點（含營業時間，若 OpenStreetMap 有收錄），不需要確認。不要捏造工具執行結果。
+當使用者要求新增、修改或刪除資料時，使用對應工具建立「變更提案」。提案不會立即寫入，使用者會在介面上看到提案卡片並自行按下確認。你的回覆中要簡短說明提案內容，並提醒使用者確認，不要宣稱變更已完成。
+
+規劃行程時，務必把一段行程描述「拆解成多筆獨立的行程項目」，每個地點、景點、餐廳、住宿都各自是一筆，不要把整天塞進同一筆。例如「抵達名古屋後前往豐田汽車博物館，之後去熱田神宮，晚餐大衆馬肉酒場，住宿名古屋車站附近」應拆成：豐田汽車博物館、熱田神宮、晚餐（大衆馬肉酒場）、住宿 等各自獨立的項目，並依時間先後用 order 排序。當一次要新增多筆行程時，用 import_itinerary 把這些拆好的項目放進 items 建立單一批次提案；只有單一項目時才用 create_itinerary。
+
+日期只寫月/日而未標年份時，請依「旅行資訊」中的旅程日期與今天日期推斷正確的年份，不要臆測成過去的年份。search_place 工具可即時查詢真實地點（含營業時間，若 OpenStreetMap 有收錄），不需要確認。不要捏造工具執行結果。
 
 以下是本次旅行的相關資料：\n\n${tripContext}`
 				},
