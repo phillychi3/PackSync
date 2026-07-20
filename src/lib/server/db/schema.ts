@@ -70,8 +70,8 @@ export const invitation = sqliteTable(
 			.notNull()
 			.references(() => user.id),
 		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
-		usedAt: integer('used_at', { mode: 'timestamp_ms' }),
-		usedBy: text('used_by').references(() => user.id)
+		maxUses: integer('max_uses'),
+		useCount: integer('use_count').notNull().default(0)
 	},
 	(t) => [index('invitation_token_idx').on(t.token), index('invitation_trip_idx').on(t.tripId)]
 )

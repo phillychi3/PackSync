@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit'
 import type { RequestHandler } from './$types'
 import { db } from '$lib/server/db'
 import { invitation, tripMember } from '$lib/server/db/schema'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { requireAuth } from '$lib/server/api'
 import { pushToTripMembers } from '$lib/server/notify'
 
@@ -15,7 +15,8 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 	})
 
 	if (!inv) throw error(404, 'Invitation not found')
-	if (inv.usedAt) throw error(410, 'Invitation already used')
+	if (inv.maxUses !== null && inv.useCount >= inv.maxUses)
+		throw error(410, 'Invitation use limit reached')
 	if (inv.expiresAt < new Date()) throw error(410, 'Invitation expired')
 
 	return json({ invitation: inv, trip: inv.trip })
@@ -29,7 +30,8 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 	})
 
 	if (!inv) throw error(404, 'Invitation not found')
-	if (inv.usedAt) throw error(410, 'Invitation already used')
+	if (inv.maxUses !== null && inv.useCount >= inv.maxUses)
+		throw error(410, 'Invitation use limit reached')
 	if (inv.expiresAt < new Date()) throw error(410, 'Invitation expired')
 
 	const existing = await db.query.tripMember.findFirst({
@@ -48,7 +50,7 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 		})
 		await tx
 			.update(invitation)
-			.set({ usedAt: new Date(), usedBy: user.id })
+			.set({ useCount: sql`${invitation.useCount} + 1` })
 			.where(eq(invitation.id, inv.id))
 	})
 

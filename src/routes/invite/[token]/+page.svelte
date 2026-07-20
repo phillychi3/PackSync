@@ -12,6 +12,7 @@
 	const isReady = $derived(result.state === 'ready')
 	const isLoginRequired = $derived(result.state === 'login_required')
 	const isAlreadyMember = $derived(result.state === 'already_member')
+	const isExhausted = $derived(result.state === 'exhausted')
 	const tripHref = $derived(
 		result.tripId ? `/trips/${result.tripId}` : trip ? `/trips/${trip.id}` : '/trips'
 	)

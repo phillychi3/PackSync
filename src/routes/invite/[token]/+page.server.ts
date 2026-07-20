@@ -1,10 +1,10 @@
 import { fail } from '@sveltejs/kit'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { db } from '$lib/server/db'
 import { invitation, tripMember } from '$lib/server/db/schema'
 import type { Actions, PageServerLoad } from './$types'
 
-type InviteState = 'ready' | 'login_required' | 'not_found' | 'expired' | 'used' | 'already_member'
+type InviteState = 'ready' | 'login_required' | 'not_found' | 'expired' | 'exhausted' | 'already_member'
 
 async function getInvitation(token: string) {
 	return db.query.invitation.findFirst({
@@ -45,10 +45,10 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
 		}
 	}
 
-	if (inv.usedAt) {
+	if (inv.maxUses !== null && inv.useCount >= inv.maxUses) {
 		return {
-			state: 'used' satisfies InviteState,
-			message: '這個邀請連結已經被使用過了。',
+			state: 'exhausted' satisfies InviteState,
+			message: '這個邀請連結的使用次數已達上限。',
 			trip: inv.trip
 		}
 	}
@@ -98,10 +98,10 @@ export const actions: Actions = {
 			})
 		}
 
-		if (inv.usedAt) {
+		if (inv.maxUses !== null && inv.useCount >= inv.maxUses) {
 			return fail(410, {
-				state: 'used',
-				message: '這個邀請連結已經被使用過了。'
+				state: 'exhausted',
+				message: '這個邀請連結的使用次數已達上限。'
 			})
 		}
 
@@ -120,7 +120,7 @@ export const actions: Actions = {
 			})
 			await tx
 				.update(invitation)
-				.set({ usedAt: new Date(), usedBy: locals.user!.id })
+				.set({ useCount: sql`${invitation.useCount} + 1` })
 				.where(eq(invitation.id, inv.id))
 		})
 

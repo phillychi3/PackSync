@@ -22,7 +22,8 @@
 		id: string
 		token: string
 		expiresAt: string | number
-		usedAt: string | number | null
+		maxUses: number | null
+		useCount: number
 	}
 	let { data }: { data: PageData } = $props()
 	let members = $state<Member[]>([])
@@ -30,6 +31,7 @@
 	let inviteUrl = $state('')
 	let copied = $state(false)
 	let inviting = $state(false)
+	let newInviteMaxUses = $state<number | null>(null)
 	const isOwner = $derived(data.role === 'owner')
 	const canManage = $derived(
 		(data.role === 'owner' || data.role === 'admin') && data.trip.status !== 'completed'
@@ -40,7 +42,11 @@
 		member: '成員'
 	}
 	const activeInvites = $derived(
-		invites.filter((invite) => !invite.usedAt && new Date(invite.expiresAt) > new Date())
+		invites.filter(
+			(invite) =>
+				new Date(invite.expiresAt) > new Date() &&
+				(invite.maxUses === null || invite.useCount < invite.maxUses)
+		)
 	)
 
 	function memberLabel(member: Member) {
@@ -70,13 +76,15 @@
 		const response = await fetch(`/api/trips/${data.trip.id}/invite`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ expiresInHours: 72 })
+			body: JSON.stringify({ expiresInHours: 72, maxUses: newInviteMaxUses })
 		})
 		if (response.ok) {
 			const created = await response.json()
 			inviteUrl = `${location.origin}/invite/${created.token}`
 			invites = [...invites, created]
-			toast.success('邀請連結已建立，3 天內有效')
+			const usesLabel =
+				newInviteMaxUses === null ? '無限次使用' : `最多 ${newInviteMaxUses} 次使用`
+			toast.success(`邀請連結已建立，3 天內有效，${usesLabel}`)
 		} else {
 			toast.error('建立邀請連結失敗，請稍後再試')
 		}
@@ -110,6 +118,7 @@
 			return
 		}
 		invites = invites.filter((entry) => entry.id !== invite.id)
+		newInviteMaxUses = invite.maxUses
 		await createInvite()
 	}
 	async function copy(token?: string) {
@@ -204,23 +213,41 @@
 				>
 			{/if}
 			{#if canManage}
-				<Button
-					type="button"
-					disabled={inviting}
-					class="h-11 rounded-none bg-[#d8ff36] font-bold text-black hover:bg-[#c8ef28]"
-					onclick={createInvite}
-					><UserPlus class="size-4" /> {inviting ? '建立中…' : '建立邀請連結'}</Button
-				>
+				<div class="flex items-center gap-2">
+					<select
+						bind:value={newInviteMaxUses}
+						class="h-11 border border-black/20 bg-white px-3 font-mono text-sm font-bold focus:outline-none"
+					>
+						<option value={null}>無限次</option>
+						<option value={1}>1 次</option>
+						<option value={5}>5 次</option>
+						<option value={10}>10 次</option>
+						<option value={20}>20 次</option>
+					</select>
+					<Button
+						type="button"
+						disabled={inviting}
+						class="h-11 rounded-none bg-[#d8ff36] font-bold text-black hover:bg-[#c8ef28]"
+						onclick={createInvite}
+						><UserPlus class="size-4" /> {inviting ? '建立中…' : '建立邀請連結'}</Button
+					>
+				</div>
 			{/if}
 		</div>
 	</div>
-	{#if inviteUrl}<div
+	{#if inviteUrl}
+		{@const latestInvite = invites.at(-1)}
+		<div
 			class="mt-6 flex flex-col gap-3 border border-[#b8e600] bg-[#efffc1] p-4 sm:flex-row sm:items-center"
 		>
 			<Mail class="size-5 shrink-0" />
 			<div class="min-w-0 flex-1">
 				<p class="truncate font-mono text-sm">{inviteUrl}</p>
-				<p class="mt-1 text-xs text-black/50">有效期限 3 天，任何拿到連結的人都能加入。</p>
+				<p class="mt-1 text-xs text-black/50">
+					有效期限 3 天・{latestInvite?.maxUses === null
+						? '無限次使用'
+						: `最多 ${latestInvite?.maxUses} 次使用`}
+				</p>
 			</div>
 			<Button
 				type="button"
@@ -228,7 +255,8 @@
 				class="h-9 rounded-none border-black/20 bg-white font-bold"
 				onclick={() => copy()}><Copy class="size-4" /> {copied ? '已複製' : '複製連結'}</Button
 			>
-		</div>{/if}
+		</div>
+	{/if}
 
 	{#if canManage && activeInvites.length > 0}
 		<section class="mt-6 border border-black/10 bg-white p-4">
@@ -241,6 +269,11 @@
 						<span class="min-w-0 flex-1 truncate font-mono text-xs text-black/55"
 							>…/invite/{invite.token.slice(0, 8)}…</span
 						>
+						<span class="text-xs text-black/45">
+							{invite.maxUses === null
+								? `已使用 ${invite.useCount} 次（無限）`
+								: `${invite.useCount} / ${invite.maxUses} 次`}
+						</span>
 						<span class="text-xs text-black/45">到期：{formatExpiry(invite.expiresAt)}</span>
 						<button
 							type="button"

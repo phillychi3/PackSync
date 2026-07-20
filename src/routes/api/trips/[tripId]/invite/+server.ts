@@ -24,6 +24,8 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 	const expiresInHours = body.expiresInHours ?? 24
 	const expiresAt = new Date(Date.now() + expiresInHours * 3600 * 1000)
 	const token = crypto.randomUUID()
+	// null = unlimited; positive integer = max number of accepted uses
+	const maxUses: number | null = body.maxUses !== undefined ? (body.maxUses ?? null) : null
 
 	const [created] = await db
 		.insert(invitation)
@@ -31,7 +33,8 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 			tripId: params.tripId,
 			token,
 			createdBy: user.id,
-			expiresAt
+			expiresAt,
+			maxUses
 		})
 		.returning()
 
