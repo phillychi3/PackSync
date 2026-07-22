@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths'
-	import { ArrowRight, CircleDollarSign, Plus, RefreshCw } from '@lucide/svelte'
+	import { ArrowRight, Check, ChevronDown, CircleDollarSign, Plus, RefreshCw } from '@lucide/svelte'
 	import { Axis, Bars, Chart, Layer, Pie } from 'layerchart'
 	import { ChartContainer } from '$lib/components/ui/chart'
 	import type { ChartConfig } from '$lib/components/ui/chart'
@@ -19,6 +19,7 @@
 		date: string
 		category: string | null
 		splitMethod: 'equal' | 'percentage' | 'fixed'
+		mergeGroupId: string | null
 		payers: { userId: string; amount: number }[]
 		participants: { userId: string; value: number | null }[]
 		items: { amount: number; participants: string | null }[]
@@ -35,9 +36,21 @@
 		toUser: SUser
 		details?: { billId: string; billTitle: string; itemName: string; amount: number }[]
 		billId?: string | null
+		mergeGroupId?: string | null
 	}
 	type CalculatedTransfer = { fromUserId: string; toUserId: string; amount: number }
-	type Calculation = { balances: Record<string, number>; transfers: CalculatedTransfer[] }
+	type ChainLink = {
+		billId: string
+		billTitle: string
+		fromUserId: string
+		toUserId: string
+		amount: number
+	}
+	type Calculation = {
+		balances: Record<string, number>
+		transfers: CalculatedTransfer[]
+		chains?: Record<string, ChainLink[]>
+	}
 
 	let { data }: { data: PageData } = $props()
 	let bills = $state<Bill[]>([])
@@ -47,8 +60,13 @@
 	let statsEnd = $state('')
 	let chartsReady = $state(false)
 	let calculatedBalances = $state<Record<string, number>>({})
+	let mergeChains = $state<Record<string, ChainLink[]>>({})
 	let recalculating = $state(false)
 	let calculated = $state(false)
+	let selecting = $state(false)
+	let selectedIds = $state<string[]>([])
+	let merging = $state(false)
+	let expandedChains = $state<Record<string, boolean>>({})
 
 	let total = $derived(bills.reduce((sum, b) => sum + b.amount, 0))
 	let filteredBills = $derived(
@@ -147,19 +165,63 @@
 		amount: { label: '每日支出', color: 'var(--chart-1)' }
 	} satisfies ChartConfig
 	let pendingSettlements = $derived(settlements.filter((settlement) => !settlement.isSettled))
+	let billTitleById = $derived(new Map(bills.map((bill) => [bill.id, bill.title])))
+	let mergeGroupTitles = $derived.by(() => {
+		const titles = new Map<string, string[]>()
+		for (const bill of bills) {
+			if (!bill.mergeGroupId) continue
+			const list = titles.get(bill.mergeGroupId) ?? []
+			list.push(bill.title)
+			titles.set(bill.mergeGroupId, list)
+		}
+		return titles
+	})
 	let settlementGroups = $derived.by(() => {
-		const groups = new Map<string, { title: string; settlements: Settlement[] }>()
+		const groups = new Map<
+			string,
+			{ key: string; title: string; merged: boolean; settlements: Settlement[] }
+		>()
 		for (const settlement of pendingSettlements) {
-			const firstDetail = settlement.details?.[0]
-			const key = firstDetail?.billId ?? 'legacy'
+			const key = settlement.mergeGroupId ?? settlement.billId ?? 'legacy'
+			let title: string
+			if (settlement.mergeGroupId) {
+				title = `合併：${mergeGroupTitles.get(settlement.mergeGroupId)?.join('、') ?? '多筆費用'}`
+			} else if (settlement.billId) {
+				title = billTitleById.get(settlement.billId) ?? settlement.details?.[0]?.billTitle ?? '費用'
+			} else {
+				title = '其他費用'
+			}
 			const group = groups.get(key) ?? {
-				title: firstDetail?.billTitle ?? '其他費用',
+				key,
+				title,
+				merged: !!settlement.mergeGroupId,
 				settlements: []
 			}
 			group.settlements.push(settlement)
 			groups.set(key, group)
 		}
 		return [...groups.values()]
+	})
+	let billGroups = $derived.by(() => {
+		const byGroup = new Map<string, Bill[]>()
+		for (const bill of bills) {
+			if (!bill.mergeGroupId) continue
+			const list = byGroup.get(bill.mergeGroupId) ?? []
+			list.push(bill)
+			byGroup.set(bill.mergeGroupId, list)
+		}
+		const emitted = new Set<string>()
+		const result: { groupId: string | null; bills: Bill[] }[] = []
+		for (const bill of bills) {
+			if (bill.mergeGroupId) {
+				if (emitted.has(bill.mergeGroupId)) continue
+				emitted.add(bill.mergeGroupId)
+				result.push({ groupId: bill.mergeGroupId, bills: byGroup.get(bill.mergeGroupId) ?? [] })
+			} else {
+				result.push({ groupId: null, bills: [bill] })
+			}
+		}
+		return result
 	})
 
 	let myPendingBalance = $derived.by(() => {
@@ -177,6 +239,13 @@
 
 	function userName(u: SUser) {
 		return u.name || u.email
+	}
+
+	let memberNameById = $derived(
+		new Map(members.map((member) => [member.userId, member.name || member.email]))
+	)
+	function memberName(userId: string) {
+		return memberNameById.get(userId) ?? '未知成員'
 	}
 
 	function transfersMatch(current: Settlement[], calculated: CalculatedTransfer[]) {
@@ -201,6 +270,7 @@
 
 		if (calculation) {
 			calculatedBalances = calculation.balances
+			mergeChains = calculation.chains ?? {}
 			calculated = true
 			if (!transfersMatch(loadedSettlements, calculation.transfers)) {
 				await recalculate()
@@ -219,6 +289,7 @@
 			if (calculationRes.ok) {
 				const calculation: Calculation = await calculationRes.json()
 				calculatedBalances = calculation.balances
+				mergeChains = calculation.chains ?? {}
 			}
 			calculated = true
 			toast.success('結算已重新計算')
@@ -226,6 +297,56 @@
 			toast.error('重新計算失敗，請稍後再試')
 		}
 		recalculating = false
+	}
+
+	function toggleChain(key: string) {
+		expandedChains[key] = !expandedChains[key]
+	}
+
+	function toggleSelected(billId: string) {
+		selectedIds = selectedIds.includes(billId)
+			? selectedIds.filter((id) => id !== billId)
+			: [...selectedIds, billId]
+	}
+
+	function cancelSelecting() {
+		selecting = false
+		selectedIds = []
+	}
+
+	async function mergeSelected() {
+		if (selectedIds.length < 2 || merging) return
+		merging = true
+		const res = await fetch(`/api/trips/${data.trip.id}/bills/merge`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ billIds: selectedIds })
+		})
+		if (res.ok) {
+			cancelSelecting()
+			await load()
+			toast.success('已合併款項並重新計算')
+		} else {
+			toast.error('合併失敗，請稍後再試')
+		}
+		merging = false
+	}
+
+	async function unmergeGroup(groupId: string) {
+		if (merging) return
+		merging = true
+		const res = await fetch(`/api/trips/${data.trip.id}/bills/merge`, {
+			method: 'DELETE',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ groupId })
+		})
+		if (res.ok) {
+			await load()
+			toast.success('已取消合併')
+		} else {
+			toast.error('取消合併失敗，請稍後再試')
+		}
+		merging = false
 	}
 
 	async function toggleSettled(s: Settlement) {
@@ -261,7 +382,7 @@
 			<h2 class="mt-3 text-4xl font-black tracking-[-0.05em]">共同花費</h2>
 			<p class="mt-3 text-black/55">記錄每一筆支出，讓最後的分攤更清楚。</p>
 		</div>
-		<div class="flex gap-2">
+		<div class="flex flex-wrap gap-2">
 			<Button
 				variant="outline"
 				class="h-11 rounded-none font-bold"
@@ -423,9 +544,17 @@
 		<section class="mt-8">
 			<p class="mb-3 font-mono text-[10px] font-bold tracking-widest text-black/40">轉帳明細</p>
 			<div class="grid gap-4">
-				{#each settlementGroups as group}
+				{#each settlementGroups as group (group.key)}
 					<div>
-						<p class="mb-2 text-sm font-bold">{group.title}</p>
+						<p class="mb-2 flex items-center gap-2 text-sm font-bold">
+							{#if group.merged}
+								<span
+									class="border border-black/25 bg-[#f6ffd6] px-1.5 py-0.5 font-mono text-[9px] font-bold tracking-widest text-black/60"
+									>合併</span
+								>
+							{/if}
+							{group.title}
+						</p>
 						<div class="grid gap-2">
 							{#each group.settlements as s (s.id)}
 								{@const isMe = s.fromUserId === data.user.id || s.toUserId === data.user.id}
@@ -475,7 +604,7 @@
 									>
 										{s.isSettled ? '已付清' : '標記付清'}
 									</button>
-									{#if s.details && s.details.length > 0}
+									{#if !group.merged && s.details && s.details.length > 0}
 										<div
 											class="mt-2 basis-full border-t border-black/10 pt-2 text-xs text-black/55"
 										>
@@ -490,59 +619,231 @@
 								</div>
 							{/each}
 						</div>
+						{#if group.merged && mergeChains[group.key]?.length}
+							{@const expanded = expandedChains[group.key] ?? false}
+							<div
+								class="mt-2 border border-dashed border-black/20 bg-[#fbfcf8] text-xs text-black/60"
+							>
+								<button
+									type="button"
+									onclick={() => toggleChain(group.key)}
+									aria-expanded={expanded}
+									class="flex w-full items-center justify-between gap-2 p-3 text-left"
+								>
+									<span class="font-mono text-[10px] font-bold tracking-widest text-black/45"
+										>分錢簡化過程</span
+									>
+									<ChevronDown
+										class="size-3.5 shrink-0 text-black/40 transition-transform {expanded
+											? 'rotate-180'
+											: ''}"
+									/>
+								</button>
+								{#if expanded}
+									<div class="border-t border-black/10 p-3 pt-2.5">
+										<div>
+											<span class="font-bold text-black/50">原始欠款</span>
+											<div class="mt-1 grid gap-0.5">
+												{#each mergeChains[group.key] as link, index (index)}
+													<div class="flex items-center gap-1.5">
+														<span class="shrink-0 text-black/40">{link.billTitle}</span>
+														<span class="truncate">{memberName(link.fromUserId)}</span>
+														<ArrowRight class="size-3 shrink-0 text-black/30" />
+														<span class="truncate">{memberName(link.toUserId)}</span>
+														<span class="ml-auto shrink-0 font-mono"
+															>{data.trip.currency}{link.amount.toFixed(2)}</span
+														>
+													</div>
+												{/each}
+											</div>
+										</div>
+										<div class="mt-2 border-t border-black/10 pt-2">
+											<span class="font-bold text-black/50">合併後</span>
+											<div class="mt-1 grid gap-0.5">
+												{#each group.settlements as s (s.id)}
+													<div class="flex items-center gap-1.5">
+														<span class="truncate">{userName(s.fromUser)}</span>
+														<ArrowRight class="size-3 shrink-0 text-black/30" />
+														<span class="truncate">{userName(s.toUser)}</span>
+														<span class="ml-auto shrink-0 font-mono"
+															>{data.trip.currency}{s.amount.toFixed(2)}</span
+														>
+													</div>
+												{/each}
+											</div>
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/if}
 					</div>
 				{/each}
 			</div>
 		</section>
 	{/if}
 
+	{#snippet billCardInner(bill: Bill)}
+		{@const settledTransfers = settlements.filter(
+			(settlement) => settlement.isSettled && settlement.billId === bill.id
+		)}
+		<span class="grid size-10 place-items-center bg-[#eef0eb]">
+			<CircleDollarSign class="size-5 text-[#779a00]" />
+		</span>
+		<span class="min-w-0 flex-1">
+			<span class="block truncate font-bold">{bill.title}</span>
+			<span class="mt-1 block text-xs text-black/45">
+				{bill.date}{bill.category ? ` · ${bill.category}` : ''}
+			</span>
+		</span>
+		<span class="font-mono font-bold">{bill.currency} {bill.amount.toFixed(2)}</span>
+		{#if settledTransfers.length > 0}
+			<div class="basis-full border-t border-black/10 pt-2 text-xs text-green-700">
+				<div>
+					已付清：{#each settledTransfers as transfer, index}{#if index > 0}、{/if}{userName(
+							transfer.fromUser
+						)} → {userName(transfer.toUser)}
+						{bill.currency}{transfer.amount.toFixed(2)}{/each}
+				</div>
+				{#each settledTransfers as transfer (transfer.id)}
+					<button
+						type="button"
+						class="mt-1 font-bold underline hover:text-black"
+						onclick={(event) => {
+							event.preventDefault()
+							event.stopPropagation()
+							toggleSettled(transfer)
+						}}
+					>
+						Undo {userName(transfer.fromUser)} → {userName(transfer.toUser)}
+					</button>
+				{/each}
+			</div>
+		{/if}
+	{/snippet}
+
+	{#snippet billRow(bill: Bill)}
+		{#if selecting}
+			{@const isSelected = selectedIds.includes(bill.id)}
+			<button
+				type="button"
+				onclick={() => toggleSelected(bill.id)}
+				class="flex w-full flex-wrap items-center gap-4 border p-4 text-left transition {isSelected
+					? 'border-black bg-[#f6ffd6]'
+					: 'border-black/10 bg-white hover:border-black/30'}"
+			>
+				<span
+					class="grid size-5 shrink-0 place-items-center border {isSelected
+						? 'border-black bg-black text-white'
+						: 'border-black/30 bg-white'}"
+				>
+					{#if isSelected}<Check class="size-3.5" />{/if}
+				</span>
+				{@render billCardInner(bill)}
+			</button>
+		{:else}
+			<a
+				href={resolve(`/trips/${data.trip.id}/expenses/${bill.id}`)}
+				class="flex flex-wrap items-center gap-4 border border-black/10 bg-white p-4 transition hover:border-black/30"
+			>
+				{@render billCardInner(bill)}
+			</a>
+		{/if}
+	{/snippet}
+
 	<section class="mt-8">
-		{#if settlements.length > 0}
-			<p class="mb-3 font-mono text-[10px] font-bold tracking-widest text-black/40">費用紀錄</p>
+		<div class="mb-3 flex items-center justify-between gap-3">
+			<p class="font-mono text-[10px] font-bold tracking-widest text-black/40">費用紀錄</p>
+			{#if bills.length >= 2}
+				{#if selecting}
+					<div class="flex gap-2">
+						<button
+							type="button"
+							onclick={mergeSelected}
+							disabled={selectedIds.length < 2 || merging}
+							class="h-8 border border-black bg-black px-3 font-mono text-[10px] font-bold tracking-widest text-white transition hover:bg-black/80 disabled:opacity-40"
+						>
+							合併選取（{selectedIds.length}）
+						</button>
+						<button
+							type="button"
+							onclick={cancelSelecting}
+							disabled={merging}
+							class="h-8 border border-black/20 bg-white px-3 font-mono text-[10px] font-bold tracking-widest text-black/50 transition hover:border-black/40 hover:text-black/70 disabled:opacity-40"
+						>
+							取消
+						</button>
+					</div>
+				{:else}
+					<button
+						type="button"
+						onclick={() => (selecting = true)}
+						class="h-8 border border-black/20 bg-white px-3 font-mono text-[10px] font-bold tracking-widest text-black/60 transition hover:border-black/40 hover:text-black"
+					>
+						合併款項
+					</button>
+				{/if}
+			{/if}
+		</div>
+		{#if selecting}
+			<p class="mb-3 text-xs text-black/50">
+				勾選要合併計算的費用（至少兩筆），系統會把選中的款項淨額合併成一組轉帳。
+			</p>
 		{/if}
 		<div class="grid gap-2">
-			{#each bills as bill (bill.id)}
-				{@const settledTransfers = settlements.filter(
-					(settlement) => settlement.isSettled && settlement.billId === bill.id
-				)}
-				<a
-					href={resolve(`/trips/${data.trip.id}/expenses/${bill.id}`)}
-					class="flex flex-wrap items-center gap-4 border border-black/10 bg-white p-4 transition hover:border-black/30"
-				>
-					<span class="grid size-10 place-items-center bg-[#eef0eb]">
-						<CircleDollarSign class="size-5 text-[#779a00]" />
-					</span>
-					<span class="min-w-0 flex-1">
-						<span class="block truncate font-bold">{bill.title}</span>
-						<span class="mt-1 block text-xs text-black/45">
-							{bill.date}{bill.category ? ` · ${bill.category}` : ''}
-						</span>
-					</span>
-					<span class="font-mono font-bold">{bill.currency} {bill.amount.toFixed(2)}</span>
-					{#if settledTransfers.length > 0}
-						<div class="basis-full border-t border-black/10 pt-2 text-xs text-green-700">
-							<div>
-								已付清：{#each settledTransfers as transfer, index}{#if index > 0}、{/if}{userName(
-										transfer.fromUser
-									)} → {userName(transfer.toUser)}
-									{bill.currency}{transfer.amount.toFixed(2)}{/each}
-							</div>
-							{#each settledTransfers as transfer (transfer.id)}
+			{#each billGroups as group (group.groupId ?? group.bills[0].id)}
+				{#if group.groupId}
+					{@const groupTotal = group.bills.reduce((sum, bill) => sum + bill.amount, 0)}
+					{@const groupSettled = settlements.filter(
+						(settlement) => settlement.isSettled && settlement.mergeGroupId === group.groupId
+					)}
+					<div class="border border-black/25 bg-[#faf7ea] p-2">
+						<div class="mb-2 flex items-center justify-between gap-2 px-1">
+							<span
+								class="flex items-center gap-2 font-mono text-[10px] font-bold tracking-widest text-black/50"
+							>
+								<span class="border border-black/25 bg-[#f6ffd6] px-1.5 py-0.5">合併群組</span>
+								{group.bills.length} 筆 · {data.trip.currency}
+								{groupTotal.toFixed(2)}
+							</span>
+							{#if !selecting}
 								<button
 									type="button"
-									class="mt-1 font-bold underline hover:text-black"
-									onclick={(event) => {
-										event.preventDefault()
-										event.stopPropagation()
-										toggleSettled(transfer)
-									}}
+									onclick={() => group.groupId && unmergeGroup(group.groupId)}
+									disabled={merging}
+									class="shrink-0 font-mono text-[10px] font-bold tracking-widest text-black/45 underline transition hover:text-black disabled:opacity-40"
 								>
-									Undo {userName(transfer.fromUser)} → {userName(transfer.toUser)}
+									取消合併
 								</button>
+							{/if}
+						</div>
+						<div class="grid gap-2">
+							{#each group.bills as bill (bill.id)}
+								{@render billRow(bill)}
 							{/each}
 						</div>
-					{/if}
-				</a>
+						{#if groupSettled.length > 0}
+							<div class="mt-2 border-t border-black/10 px-1 pt-2 text-xs text-green-700">
+								<div>
+									已付清：{#each groupSettled as transfer, index}{#if index > 0}、{/if}{userName(
+											transfer.fromUser
+										)} → {userName(transfer.toUser)}
+										{data.trip.currency}{transfer.amount.toFixed(2)}{/each}
+								</div>
+								{#each groupSettled as transfer (transfer.id)}
+									<button
+										type="button"
+										class="mt-1 font-bold underline hover:text-black"
+										onclick={() => toggleSettled(transfer)}
+									>
+										Undo {userName(transfer.fromUser)} → {userName(transfer.toUser)}
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{:else}
+					{@render billRow(group.bills[0])}
+				{/if}
 			{/each}
 			{#if bills.length === 0}
 				<div class="border border-dashed border-black/20 bg-white p-10 text-center text-black/50">

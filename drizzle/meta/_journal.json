@@ -36,6 +36,13 @@
       "when": 1784561526261,
       "tag": "0004_steady_shinobi_shaw",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784737157058,
+      "tag": "0005_thick_nightmare",
+      "breakpoints": true
     }
   ]
 }

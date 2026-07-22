@@ -149,6 +149,8 @@ export const bill = sqliteTable(
 		splitMethod: text('split_method', { enum: ['equal', 'percentage', 'fixed'] })
 			.notNull()
 			.default('equal'),
+		// Bills sharing the same non-null id are settled together as one merged group.
+		mergeGroupId: text('merge_group_id'),
 		notes: text('notes'),
 		createdBy: text('created_by')
 			.notNull()
@@ -226,6 +228,8 @@ export const settlement = sqliteTable(
 			.notNull()
 			.references(() => trip.id, { onDelete: 'cascade' }),
 		billId: text('bill_id').references(() => bill.id, { onDelete: 'cascade' }),
+		// Set when this settlement represents a merged group of bills (billId is null then).
+		mergeGroupId: text('merge_group_id'),
 		fromUserId: text('from_user_id')
 			.notNull()
 			.references(() => user.id),
