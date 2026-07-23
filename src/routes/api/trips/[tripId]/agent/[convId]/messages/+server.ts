@@ -8,6 +8,7 @@ import {
 	conversation,
 	message,
 	place,
+	packingList,
 	scheduleItem,
 	todo,
 	criticalItem,
@@ -193,6 +194,65 @@ const agentTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 	{
 		type: 'function',
 		function: {
+			name: 'create_packing_item',
+			description:
+				'提出「新增單筆打包物品」的變更提案。提案需要使用者確認後才會寫入。listName 用來指定要加入哪份打包清單，沒有指定或找不到時會使用/建立預設清單。assignedTo 為負責攜帶的成員名稱（需對應旅行成員）。',
+			parameters: {
+				type: 'object',
+				properties: {
+					listName: {
+						type: ['string', 'null'],
+						description: '目標打包清單名稱，會對應到旅程已存在的清單，沒有相符時會新建'
+					},
+					name: { type: 'string', description: '物品名稱，例如充電線' },
+					category: { type: ['string', 'null'], description: '分類，例如電子用品、衣物' },
+					quantity: { type: ['number', 'null'], description: '數量，未指定時為 1' },
+					assignedTo: { type: ['string', 'null'], description: '負責攜帶的成員名稱' },
+					notes: { type: ['string', 'null'], description: '備註' }
+				},
+				required: ['listName', 'name', 'category', 'quantity', 'assignedTo', 'notes'],
+				additionalProperties: false
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'import_packing_items',
+			description:
+				'提出「批次新增多筆打包物品」的單一變更提案。當使用者要求一次產生或匯入整份打包清單時使用，不要拆成多個 create_packing_item。listName 用來指定目標清單，沒有指定或找不到時會使用/建立預設清單。',
+			parameters: {
+				type: 'object',
+				properties: {
+					listName: {
+						type: ['string', 'null'],
+						description: '目標打包清單名稱，會對應到旅程已存在的清單，沒有相符時會新建'
+					},
+					items: {
+						type: 'array',
+						description: '要新增的打包物品清單',
+						items: {
+							type: 'object',
+							properties: {
+								name: { type: 'string', description: '物品名稱' },
+								category: { type: ['string', 'null'], description: '分類' },
+								quantity: { type: ['number', 'null'], description: '數量，未指定時為 1' },
+								assignedTo: { type: ['string', 'null'], description: '負責攜帶的成員名稱' },
+								notes: { type: ['string', 'null'], description: '備註' }
+							},
+							required: ['name', 'category', 'quantity', 'assignedTo', 'notes'],
+							additionalProperties: false
+						}
+					}
+				},
+				required: ['listName', 'items'],
+				additionalProperties: false
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
 			name: 'search_place',
 			description:
 				'搜尋真實地點的名稱、地址、座標，以及可取得時的營業時間、網站、電話（OpenStreetMap 資料）。查詢地點資訊或使用者想加入新景點時使用，不需要使用者確認。',
@@ -214,7 +274,9 @@ const PROPOSAL_TOOLS = new Set([
 	'update_itinerary',
 	'delete_itinerary',
 	'create_todo',
-	'create_critical_item'
+	'create_critical_item',
+	'create_packing_item',
+	'import_packing_items'
 ])
 
 async function searchPlace(query: string) {
@@ -254,29 +316,35 @@ async function searchPlace(query: string) {
 }
 
 async function buildTripContext(tripId: string) {
-	const [tripRow, places, schedule, bills, todos, criticals, members] = await Promise.all([
-		db.query.trip.findFirst({ where: eq(trip.id, tripId) }),
-		db.query.place.findMany({ where: eq(place.tripId, tripId) }),
-		db.query.scheduleItem.findMany({
-			where: eq(scheduleItem.tripId, tripId),
-			orderBy: [asc(scheduleItem.date), asc(scheduleItem.order)]
-		}),
-		db.query.bill.findMany({
-			where: eq(bill.tripId, tripId),
-			with: { payers: true, participants: true }
-		}),
-		db.query.todo.findMany({ where: eq(todo.tripId, tripId) }),
-		db.query.criticalItem.findMany({
-			where: eq(criticalItem.tripId, tripId),
-			with: { confirmations: true }
-		}),
-		db
-			.select({ userId: tripMember.userId, role: tripMember.role, name: user.name })
-			.from(tripMember)
-			.innerJoin(user, eq(tripMember.userId, user.id))
-			.where(eq(tripMember.tripId, tripId))
-	])
+	const [tripRow, places, schedule, bills, todos, criticals, packingLists, members] =
+		await Promise.all([
+			db.query.trip.findFirst({ where: eq(trip.id, tripId) }),
+			db.query.place.findMany({ where: eq(place.tripId, tripId) }),
+			db.query.scheduleItem.findMany({
+				where: eq(scheduleItem.tripId, tripId),
+				orderBy: [asc(scheduleItem.date), asc(scheduleItem.order)]
+			}),
+			db.query.bill.findMany({
+				where: eq(bill.tripId, tripId),
+				with: { payers: true, participants: true }
+			}),
+			db.query.todo.findMany({ where: eq(todo.tripId, tripId) }),
+			db.query.criticalItem.findMany({
+				where: eq(criticalItem.tripId, tripId),
+				with: { confirmations: true }
+			}),
+			db.query.packingList.findMany({
+				where: eq(packingList.tripId, tripId),
+				with: { items: true }
+			}),
+			db
+				.select({ userId: tripMember.userId, role: tripMember.role, name: user.name })
+				.from(tripMember)
+				.innerJoin(user, eq(tripMember.userId, user.id))
+				.where(eq(tripMember.tripId, tripId))
+		])
 
+	const memberNames = new Map(members.map((m) => [m.userId, m.name]))
 	const today = new Date().toISOString().slice(0, 10)
 
 	return `
@@ -302,6 +370,18 @@ ${todos.length ? todos.map((t) => `- [${t.isCompleted ? 'x' : ' '}] ${t.title}${
 
 ## 重要物品
 ${criticals.length ? criticals.map((c) => `- ${c.name}${c.description ? `: ${c.description}` : ''} (${c.confirmations.length} 人已確認)`).join('\n') : '尚無重要物品'}
+
+## 打包清單
+${
+	packingLists.length
+		? packingLists
+				.map(
+					(l) =>
+						`### ${l.name}\n${l.items.length ? l.items.map((it) => `- [${it.isChecked ? 'x' : ' '}] ${it.name}${it.quantity > 1 ? ` x${it.quantity}` : ''}${it.category ? ` [${it.category}]` : ''}${it.assignedTo ? ` @${memberNames.get(it.assignedTo) ?? it.assignedTo}` : ''}${it.notes ? ` — ${it.notes}` : ''}`).join('\n') : '（空清單）'}`
+				)
+				.join('\n')
+		: '尚無打包清單'
+}
 `.trim()
 }
 
@@ -353,6 +433,8 @@ export const POST: RequestHandler = async ({ locals, params, request }) => {
 當使用者要求新增、修改或刪除資料時，使用對應工具建立「變更提案」。提案不會立即寫入，使用者會在介面上看到提案卡片並自行按下確認。你的回覆中要簡短說明提案內容，並提醒使用者確認，不要宣稱變更已完成。
 
 規劃行程時，務必把一段行程描述「拆解成多筆獨立的行程項目」，每個地點、景點、餐廳、住宿都各自是一筆，不要把整天塞進同一筆。例如「抵達名古屋後前往豐田汽車博物館，之後去熱田神宮，晚餐大衆馬肉酒場，住宿名古屋車站附近」應拆成：豐田汽車博物館、熱田神宮、晚餐（大衆馬肉酒場）、住宿 等各自獨立的項目，並依時間先後用 order 排序。當一次要新增多筆行程時，用 import_itinerary 把這些拆好的項目放進 items 建立單一批次提案；只有單一項目時才用 create_itinerary。
+
+當使用者要求產生或整理打包清單時，用 import_packing_items 一次建立多筆打包物品的單一提案，並盡量填上合適的分類（category）；只有新增單一物品時才用 create_packing_item。
 
 日期只寫月/日而未標年份時，請依「旅行資訊」中的旅程日期與今天日期推斷正確的年份，不要臆測成過去的年份。search_place 工具可即時查詢真實地點（含營業時間，若 OpenStreetMap 有收錄），不需要確認。不要捏造工具執行結果。
 

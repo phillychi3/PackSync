@@ -82,8 +82,7 @@
 			const created = await response.json()
 			inviteUrl = `${location.origin}/invite/${created.token}`
 			invites = [...invites, created]
-			const usesLabel =
-				newInviteMaxUses === null ? '無限次使用' : `最多 ${newInviteMaxUses} 次使用`
+			const usesLabel = newInviteMaxUses === null ? '無限次使用' : `最多 ${newInviteMaxUses} 次使用`
 			toast.success(`邀請連結已建立，3 天內有效，${usesLabel}`)
 		} else {
 			toast.error('建立邀請連結失敗，請稍後再試')

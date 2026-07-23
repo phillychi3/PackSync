@@ -86,7 +86,6 @@
 		void isNetworkReachable().then((online) => {
 			if (online) void warmOfflineCache()
 		})
-
 	})
 
 	function formatDate(value: string | null) {

@@ -1,5 +1,15 @@
 import { db } from '$lib/server/db'
-import { agentAction, criticalItem, place, scheduleItem, todo } from '$lib/server/db/schema'
+import {
+	agentAction,
+	criticalItem,
+	packingItem,
+	packingList,
+	place,
+	scheduleItem,
+	todo,
+	tripMember,
+	user
+} from '$lib/server/db/schema'
 import { and, eq, like } from 'drizzle-orm'
 
 export type AgentActionRow = typeof agentAction.$inferSelect
@@ -60,6 +70,12 @@ export function summarizeAction(tool: string, args: Record<string, unknown>): st
 			return `新增待辦：${args.title ?? ''}${args.dueDate ? `（截止 ${args.dueDate}）` : ''}`
 		case 'create_critical_item':
 			return `新增重要物品：${args.name ?? ''}`
+		case 'create_packing_item':
+			return `新增打包物品：${args.name ?? ''}${num(args.quantity) && num(args.quantity)! > 1 ? ` x${args.quantity}` : ''}`
+		case 'import_packing_items': {
+			const items = Array.isArray(args.items) ? args.items : []
+			return `批次新增 ${items.length} 筆打包物品${str(args.listName) ? `（${str(args.listName)}）` : ''}`
+		}
 		default:
 			return tool
 	}
@@ -88,6 +104,46 @@ async function resolvePlaceId(tripId: string, placeName: unknown): Promise<strin
 		where: and(eq(place.tripId, tripId), like(place.name, `%${name}%`))
 	})
 	return fuzzy?.id ?? null
+}
+
+async function resolveMemberId(tripId: string, memberName: unknown): Promise<string | null> {
+	const name = str(memberName)
+	if (!name) return null
+	const rows = await db
+		.select({ userId: tripMember.userId, name: user.name })
+		.from(tripMember)
+		.innerJoin(user, eq(tripMember.userId, user.id))
+		.where(eq(tripMember.tripId, tripId))
+	const exact = rows.find((r) => r.name === name)
+	if (exact) return exact.userId
+	const fuzzy = rows.find((r) => r.name?.includes(name) || name.includes(r.name ?? ''))
+	return fuzzy?.userId ?? null
+}
+
+/** Resolves a packing list by name, creating one when none exists. Returns the id and whether it was newly created. */
+async function resolveOrCreatePackingList(
+	tripId: string,
+	listName: unknown
+): Promise<{ id: string; created: boolean }> {
+	const name = str(listName)
+	if (name) {
+		const exact = await db.query.packingList.findFirst({
+			where: and(eq(packingList.tripId, tripId), eq(packingList.name, name))
+		})
+		if (exact) return { id: exact.id, created: false }
+		const fuzzy = await db.query.packingList.findFirst({
+			where: and(eq(packingList.tripId, tripId), like(packingList.name, `%${name}%`))
+		})
+		if (fuzzy) return { id: fuzzy.id, created: false }
+		const [created] = await db.insert(packingList).values({ tripId, name }).returning()
+		return { id: created.id, created: true }
+	}
+	const existing = await db.query.packingList.findFirst({
+		where: eq(packingList.tripId, tripId)
+	})
+	if (existing) return { id: existing.id, created: false }
+	const [created] = await db.insert(packingList).values({ tripId }).returning()
+	return { id: created.id, created: true }
 }
 
 /** Executes a proposed action. Returns undo data to persist, or throws with a user-facing message. */
@@ -209,6 +265,54 @@ export async function executeAgentAction(action: AgentActionRow): Promise<string
 		return JSON.stringify({ createdId: created.id, table: 'critical_item' })
 	}
 
+	if (action.tool === 'create_packing_item') {
+		const name = str(args.name)
+		if (!name) throw new Error('提案缺少打包物品名稱')
+		const list = await resolveOrCreatePackingList(action.tripId, args.listName)
+		const assignedTo = await resolveMemberId(action.tripId, args.assignedTo)
+		const [created] = await db
+			.insert(packingItem)
+			.values({
+				listId: list.id,
+				name,
+				category: str(args.category),
+				quantity: num(args.quantity) ?? 1,
+				assignedTo,
+				notes: str(args.notes)
+			})
+			.returning()
+		return JSON.stringify({
+			createdIds: [created.id],
+			createdListId: list.created ? list.id : null
+		})
+	}
+
+	if (action.tool === 'import_packing_items') {
+		const items = Array.isArray(args.items) ? (args.items as Record<string, unknown>[]) : []
+		if (items.length === 0) throw new Error('提案沒有可新增的打包物品')
+		const list = await resolveOrCreatePackingList(action.tripId, args.listName)
+		const createdIds: string[] = []
+		for (const item of items) {
+			const name = str(item.name)
+			if (!name) continue
+			const assignedTo = await resolveMemberId(action.tripId, item.assignedTo)
+			const [created] = await db
+				.insert(packingItem)
+				.values({
+					listId: list.id,
+					name,
+					category: str(item.category),
+					quantity: num(item.quantity) ?? 1,
+					assignedTo,
+					notes: str(item.notes)
+				})
+				.returning()
+			createdIds.push(created.id)
+		}
+		if (createdIds.length === 0) throw new Error('沒有任何打包物品包含有效名稱')
+		return JSON.stringify({ createdIds, createdListId: list.created ? list.id : null })
+	}
+
 	throw new Error(`不支援的工具：${action.tool}`)
 }
 
@@ -234,6 +338,16 @@ export async function undoAgentAction(action: AgentActionRow): Promise<void> {
 	}
 	if (action.tool === 'create_critical_item') {
 		await db.delete(criticalItem).where(eq(criticalItem.id, String(undo.createdId)))
+		return
+	}
+	if (action.tool === 'create_packing_item' || action.tool === 'import_packing_items') {
+		const ids = Array.isArray(undo.createdIds) ? (undo.createdIds as string[]) : []
+		for (const id of ids) {
+			await db.delete(packingItem).where(eq(packingItem.id, id))
+		}
+		if (undo.createdListId) {
+			await db.delete(packingList).where(eq(packingList.id, String(undo.createdListId)))
+		}
 		return
 	}
 	if (action.tool === 'update_itinerary') {

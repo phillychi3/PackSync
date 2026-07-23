@@ -4,7 +4,8 @@ import { db } from '$lib/server/db'
 import { invitation, tripMember } from '$lib/server/db/schema'
 import type { Actions, PageServerLoad } from './$types'
 
-type InviteState = 'ready' | 'login_required' | 'not_found' | 'expired' | 'exhausted' | 'already_member'
+type InviteState =
+	'ready' | 'login_required' | 'not_found' | 'expired' | 'exhausted' | 'already_member'
 
 async function getInvitation(token: string) {
 	return db.query.invitation.findFirst({
